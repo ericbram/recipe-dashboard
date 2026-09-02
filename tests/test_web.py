@@ -49,6 +49,12 @@ def test_index_tag_filter(client):
     assert "Toast" not in body
 
 
+def test_plain_request_returns_full_page(client):
+    db.create_recipe(client.conn, "Chili")
+    body = client.get("/").text
+    assert "<html" in body.lower()
+
+
 def test_htmx_request_returns_fragment_only(client):
     db.create_recipe(client.conn, "Chili")
     body = client.get("/", headers={"HX-Request": "true"}).text

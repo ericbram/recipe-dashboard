@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
 <form class="filters" hx-get="/" hx-target="#list" hx-trigger="input changed delay:200ms from:#q, change from:#sort">
+  <label class="visually-hidden" for="q">Search recipes</label>
   <input id="q" name="q" type="search" placeholder="Search recipes" value="{{ q }}">
+  <label class="visually-hidden" for="sort">Sort by</label>
   <select id="sort" name="sort">
     <option value="newest" {% if sort == 'newest' %}selected{% endif %}>Newest</option>
     <option value="title"  {% if sort == 'title'  %}selected{% endif %}>Title</option>
@@ -12,9 +14,9 @@
 </form>
 
 <div class="chips">
-  <a href="/?q={{ q }}&sort={{ sort }}" class="chip {% if not tag %}on{% endif %}">All</a>
+  <a href="/?q={{ q | urlencode }}&sort={{ sort | urlencode }}" class="chip {% if not tag %}on{% endif %}" {% if not tag %}aria-current="true"{% endif %}>All</a>
   {% for t in tags %}
-    <a href="/?q={{ q }}&sort={{ sort }}&tag={{ t }}" class="chip {% if t == tag %}on{% endif %}">{{ t }}</a>
+    <a href="/?q={{ q | urlencode }}&sort={{ sort | urlencode }}&tag={{ t | urlencode }}" class="chip {% if t == tag %}on{% endif %}" {% if t == tag %}aria-current="true"{% endif %}>{{ t }}</a>
   {% endfor %}
 </div>
 

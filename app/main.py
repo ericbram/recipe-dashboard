@@ -12,6 +12,10 @@ from app import db
 BASE_DIR = Path(__file__).parent
 DB_PATH = os.environ.get("DB_PATH", "./recipes.db")
 
+# ponytail: one shared connection for the whole process. sqlite3 is built in
+# serialized mode so concurrent threadpool requests are safe at the C level, and
+# this app serves one household. Switch to a per-request connection (or a write
+# lock) if it ever needs genuinely concurrent writers.
 _conn = None
 
 
@@ -39,7 +43,14 @@ def stars(rating) -> str:
     return "★" * int(rating) + "☆" * (5 - int(rating))
 
 
+def star_label(rating) -> str:
+    if not rating:
+        return "Not rated"
+    return f"{int(rating)} out of 5"
+
+
 templates.env.globals["stars"] = stars
+templates.env.globals["star_label"] = star_label
 
 
 @app.get("/", response_class=HTMLResponse)
