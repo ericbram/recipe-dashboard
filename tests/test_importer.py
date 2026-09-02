@@ -63,3 +63,44 @@ def test_fetch_returns_none_on_network_error(monkeypatch):
 
     monkeypatch.setattr(importer.httpx, "get", boom)
     assert importer.fetch_recipe("https://example.com/whatever") is None
+
+
+def test_name_as_list_of_strings():
+    html = """<script type="application/ld+json">
+    {"@type": "Recipe", "name": ["Weeknight Chili", "Easy Chili"],
+     "recipeIngredient": ["beef"], "recipeInstructions": "Cook."}</script>"""
+    r = importer.parse_recipe(html)
+    assert r is not None
+    assert r.title == "Weeknight Chili"
+
+
+def test_name_as_non_string_non_list_returns_none():
+    html = """<script type="application/ld+json">
+    {"@type": "Recipe", "name": 42, "recipeIngredient": ["beef"],
+     "recipeInstructions": "Cook."}</script>"""
+    assert importer.parse_recipe(html) is None
+
+
+def test_deeply_nested_json_returns_none():
+    # Build deeply nested JSON using arrays to potentially trigger RecursionError in _walk
+    # Start with deeply nested structure
+    deeply_nested = '['
+    for _ in range(2000):
+        deeply_nested += '['
+    deeply_nested += '{"@type": "Recipe", "name": "Test"}'
+    for _ in range(2000):
+        deeply_nested += ']'
+    html = f'<script type="application/ld+json">{deeply_nested}</script>'
+    # Should return None (caught by exception handler) not raise
+    result = importer.parse_recipe(html)
+    assert result is None
+
+
+def test_malformed_json_followed_by_valid_recipe():
+    html = '''<script type="application/ld+json">{not json</script>
+    <script type="application/ld+json">
+    {"@type": "Recipe", "name": "Found It", "recipeIngredient": ["x"],
+     "recipeInstructions": "Go."}</script>'''
+    r = importer.parse_recipe(html)
+    assert r is not None
+    assert r.title == "Found It"

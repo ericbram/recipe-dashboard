@@ -88,6 +88,19 @@ def _tags(value) -> list[str]:
     return sorted(t for t in seen if t)
 
 
+def _extract_title(name_value) -> str:
+    """Extract a single string title from name, which may be string, list, or other type."""
+    if isinstance(name_value, str):
+        return name_value.strip()
+    if isinstance(name_value, list):
+        for item in name_value:
+            if isinstance(item, str):
+                title = item.strip()
+                if title:
+                    return title
+    return ""
+
+
 def parse_recipe(html: str, source_url: str = "") -> ImportedRecipe | None:
     collector = _JsonLdCollector()
     try:
@@ -98,21 +111,21 @@ def parse_recipe(html: str, source_url: str = "") -> ImportedRecipe | None:
     for block in collector.blocks:
         try:
             doc = json.loads(block)
-        except (ValueError, TypeError):
+            for node in _walk(doc):
+                if not _is_recipe(node):
+                    continue
+                title = _extract_title(node.get("name"))
+                if not title:
+                    continue
+                return ImportedRecipe(
+                    title=title,
+                    ingredients=_lines(node.get("recipeIngredient")),
+                    steps=_lines(node.get("recipeInstructions")),
+                    tags=_tags(node.get("recipeCategory")),
+                    source_url=source_url,
+                )
+        except Exception:
             continue
-        for node in _walk(doc):
-            if not _is_recipe(node):
-                continue
-            title = (node.get("name") or "").strip()
-            if not title:
-                continue
-            return ImportedRecipe(
-                title=title,
-                ingredients=_lines(node.get("recipeIngredient")),
-                steps=_lines(node.get("recipeInstructions")),
-                tags=_tags(node.get("recipeCategory")),
-                source_url=source_url,
-            )
     return None
 
 
