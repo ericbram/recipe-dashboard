@@ -103,3 +103,76 @@ def test_delete_recipe(conn):
     db.delete_recipe(conn, rid)
     assert db.get_recipe(conn, rid) is None
     assert db.get_tags(conn, rid) == []
+
+
+def test_list_returns_newest_first_by_default(conn):
+    a = db.create_recipe(conn, "Alpha")
+    b = db.create_recipe(conn, "Beta")
+    ids = [r["id"] for r in db.list_recipes(conn)]
+    assert ids == [b, a]
+
+
+def test_list_search_matches_title_case_insensitively(conn):
+    db.create_recipe(conn, "Chicken Curry")
+    db.create_recipe(conn, "Beef Stew")
+    titles = [r["title"] for r in db.list_recipes(conn, q="curry")]
+    assert titles == ["Chicken Curry"]
+
+
+def test_list_filters_by_tag(conn):
+    db.create_recipe(conn, "Chili", tags=["dinner"])
+    db.create_recipe(conn, "Toast", tags=["breakfast"])
+    titles = [r["title"] for r in db.list_recipes(conn, tag="dinner")]
+    assert titles == ["Chili"]
+
+
+def test_list_sorts_by_title(conn):
+    db.create_recipe(conn, "Zucchini")
+    db.create_recipe(conn, "Apple")
+    titles = [r["title"] for r in db.list_recipes(conn, sort="title")]
+    assert titles == ["Apple", "Zucchini"]
+
+
+def test_list_sorts_by_rating_with_unrated_last(conn):
+    low = db.create_recipe(conn, "Low")
+    high = db.create_recipe(conn, "High")
+    db.create_recipe(conn, "Unrated")
+    db.set_rating(conn, low, 2)
+    db.set_rating(conn, high, 5)
+    titles = [r["title"] for r in db.list_recipes(conn, sort="rating")]
+    assert titles == ["High", "Low", "Unrated"]
+
+
+def test_unknown_sort_falls_back_to_newest(conn):
+    a = db.create_recipe(conn, "Alpha")
+    b = db.create_recipe(conn, "Beta")
+    assert [r["id"] for r in db.list_recipes(conn, sort="'; DROP TABLE recipes")] == [b, a]
+
+
+def test_list_rows_include_joined_tags(conn):
+    db.create_recipe(conn, "Chili", tags=["spicy", "dinner"])
+    db.create_recipe(conn, "Toast")
+    rows = {r["title"]: r["tags"] for r in db.list_recipes(conn)}
+    assert rows["Chili"] == "dinner, spicy"
+    assert rows["Toast"] == ""
+
+
+def test_all_tags_is_distinct_and_sorted(conn):
+    db.create_recipe(conn, "Chili", tags=["dinner", "spicy"])
+    db.create_recipe(conn, "Stew", tags=["dinner"])
+    assert db.all_tags(conn) == ["dinner", "spicy"]
+
+
+def test_set_and_clear_rating(conn):
+    rid = db.create_recipe(conn, "Chili")
+    db.set_rating(conn, rid, 4)
+    assert db.get_recipe(conn, rid)["rating"] == 4
+    db.set_rating(conn, rid, None)
+    assert db.get_recipe(conn, rid)["rating"] is None
+
+
+@pytest.mark.parametrize("bad", [0, 6, -1])
+def test_set_rating_rejects_out_of_range(conn, bad):
+    rid = db.create_recipe(conn, "Chili")
+    with pytest.raises(ValueError):
+        db.set_rating(conn, rid, bad)

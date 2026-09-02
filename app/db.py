@@ -112,3 +112,58 @@ def update_recipe(
 def delete_recipe(conn: sqlite3.Connection, recipe_id: int) -> None:
     conn.execute("DELETE FROM recipes WHERE id = ?", (recipe_id,))
     conn.commit()
+
+
+_SORTS = {
+    "newest": "r.created_at DESC, r.id DESC",
+    "title": "r.title COLLATE NOCASE ASC",
+    "rating": "r.rating IS NULL, r.rating DESC, r.title COLLATE NOCASE ASC",
+}
+
+
+def list_recipes(
+    conn: sqlite3.Connection,
+    *,
+    q: str | None = None,
+    tag: str | None = None,
+    sort: str = "newest",
+) -> list[dict]:
+    where, params = [], []
+    if q:
+        where.append("r.title LIKE ?")
+        params.append(f"%{q}%")
+    if tag:
+        where.append("EXISTS (SELECT 1 FROM recipe_tags t WHERE t.recipe_id = r.id AND t.tag = ?)")
+        params.append(tag.strip().lower())
+
+    sql = f"""
+        SELECT r.*
+          FROM recipes r
+         {'WHERE ' + ' AND '.join(where) if where else ''}
+         ORDER BY {_SORTS.get(sort, _SORTS['newest'])}
+    """
+    rows = conn.execute(sql, params).fetchall()
+
+    # Tags are joined in Python: SQLite's GROUP_CONCAT has no portable ordering
+    # guarantee, and a correlated subquery in FROM is not reliable across versions.
+    by_recipe: dict[int, list[str]] = {}
+    for r in conn.execute("SELECT recipe_id, tag FROM recipe_tags ORDER BY tag"):
+        by_recipe.setdefault(r["recipe_id"], []).append(r["tag"])
+
+    out = []
+    for row in rows:
+        rec = dict(row)
+        rec["tags"] = ", ".join(by_recipe.get(rec["id"], ()))
+        out.append(rec)
+    return out
+
+
+def all_tags(conn: sqlite3.Connection) -> list[str]:
+    return [r["tag"] for r in conn.execute("SELECT DISTINCT tag FROM recipe_tags ORDER BY tag")]
+
+
+def set_rating(conn: sqlite3.Connection, recipe_id: int, rating: int | None) -> None:
+    if rating is not None and not 1 <= int(rating) <= 5:
+        raise ValueError(f"rating must be 1-5 or None, got {rating!r}")
+    conn.execute("UPDATE recipes SET rating = ? WHERE id = ?", (rating, recipe_id))
+    conn.commit()
