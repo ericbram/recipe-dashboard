@@ -2,9 +2,10 @@ import os
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -30,6 +31,20 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Recipe Dashboard", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def block_cross_origin_writes(request: Request, call_next):
+    # ponytail: Origin-check CSRF guard. No auth on this app (trusted LAN), but
+    # a mismatched Origin still means some other site's page is the one
+    # POSTing here, not us — reject that. A missing Origin (curl, no-JS
+    # clients) is allowed through; only same-origin or absent Origins pass.
+    origin = request.headers.get("origin")
+    if request.method == "POST" and origin and urlparse(origin).netloc != request.headers.get("host"):
+        return PlainTextResponse("Cross-origin write rejected", status_code=403)
+    return await call_next(request)
+
+
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
@@ -159,6 +174,8 @@ def rate_recipe(request: Request, recipe_id: int, rating: int = Form(...), conn=
         db.set_rating(conn, recipe_id, rating or None)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    if not request.headers.get("HX-Request"):
+        return RedirectResponse(f"/recipe/{recipe_id}", status_code=303)
     return templates.TemplateResponse(
         request, "_stars.html", {"r": db.get_recipe(conn, recipe_id)},
     )
@@ -166,6 +183,8 @@ def rate_recipe(request: Request, recipe_id: int, rating: int = Form(...), conn=
 
 @app.post("/recipe/{recipe_id}/delete")
 def remove_recipe(recipe_id: int, conn=Depends(get_db)):
+    if db.get_recipe(conn, recipe_id) is None:
+        raise HTTPException(status_code=404, detail="Recipe not found")
     db.delete_recipe(conn, recipe_id)
     return RedirectResponse("/", status_code=303)
 

@@ -27,7 +27,10 @@ python3 -m venv .venv
   `recipe_tags`, `plan`.
 - `app/importer.py` — pastes a URL in, reads the page's schema.org JSON-LD,
   gets a recipe out. Returns nothing rather than raising when a page has no
-  recipe data; the UI falls back to the manual form.
+  recipe data; the UI falls back to the manual form. Note that importing a
+  URL makes the server itself fetch that URL, so it can reach addresses on
+  your home network that your browser can reach too — only import URLs you
+  trust.
 - `app/main.py` — FastAPI routes. Each one renders a full page normally and a
   bare fragment when HTMX asks for it.
 

@@ -144,10 +144,45 @@ def test_rate_rejects_out_of_range(client):
     assert client.post(f"/recipe/{rid}/rate", data={"rating": "9"}).status_code == 400
 
 
+def test_rate_without_hx_header_redirects(client):
+    rid = db.create_recipe(client.conn, "Chili")
+    resp = client.post(f"/recipe/{rid}/rate", data={"rating": "4"}, follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == f"/recipe/{rid}"
+    assert db.get_recipe(client.conn, rid)["rating"] == 4
+
+
 def test_delete_recipe(client):
     rid = db.create_recipe(client.conn, "Chili")
     resp = client.post(f"/recipe/{rid}/delete", follow_redirects=True)
     assert resp.status_code == 200
+    assert db.get_recipe(client.conn, rid) is None
+
+
+def test_delete_missing_recipe_is_404(client):
+    assert client.post("/recipe/9999/delete").status_code == 404
+
+
+def test_cross_origin_post_is_rejected(client):
+    rid = db.create_recipe(client.conn, "Chili")
+    resp = client.post(f"/recipe/{rid}/delete", headers={"Origin": "https://evil.example"})
+    assert resp.status_code == 403
+    assert db.get_recipe(client.conn, rid) is not None
+
+
+def test_post_without_origin_header_succeeds(client):
+    rid = db.create_recipe(client.conn, "Chili")
+    resp = client.post(f"/recipe/{rid}/delete", follow_redirects=False)
+    assert resp.status_code == 303
+    assert db.get_recipe(client.conn, rid) is None
+
+
+def test_post_with_matching_origin_succeeds(client):
+    rid = db.create_recipe(client.conn, "Chili")
+    host = client.base_url.host
+    resp = client.post(f"/recipe/{rid}/delete", headers={"Origin": f"http://{host}"},
+                       follow_redirects=False)
+    assert resp.status_code == 303
     assert db.get_recipe(client.conn, rid) is None
 
 
