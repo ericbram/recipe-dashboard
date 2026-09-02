@@ -1,0 +1,36 @@
+:root { --bg:#fbfaf8; --fg:#22201d; --muted:#6b6560; --line:#e4e0d9; --accent:#b4531f; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, sans-serif; }
+nav { display:flex; gap:1rem; align-items:center; padding:1rem; border-bottom:1px solid var(--line); }
+nav a { color:var(--fg); text-decoration:none; }
+nav a.primary { margin-left:auto; color:var(--accent); font-weight:600; }
+main { max-width:52rem; margin:0 auto; padding:1.5rem 1rem 4rem; }
+.filters { display:flex; gap:.5rem; margin-bottom:1rem; }
+.filters input[type=search] { flex:1; }
+input, select, textarea, button { font:inherit; padding:.5rem; border:1px solid var(--line);
+  border-radius:6px; background:#fff; color:inherit; }
+textarea { width:100%; min-height:8rem; }
+.chips { display:flex; flex-wrap:wrap; gap:.4rem; margin-bottom:1rem; }
+.chip { padding:.2rem .6rem; border:1px solid var(--line); border-radius:999px;
+  font-size:.85rem; text-decoration:none; color:var(--muted); background:#fff; }
+.chip.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+.cards { list-style:none; padding:0; margin:0; display:grid; gap:.5rem; }
+.card { display:flex; align-items:center; gap:.75rem; padding:.75rem 1rem;
+  background:#fff; border:1px solid var(--line); border-radius:8px; }
+.card a { font-weight:600; color:inherit; text-decoration:none; }
+.stars { margin-left:auto; color:var(--accent); white-space:nowrap; }
+.tags { color:var(--muted); font-size:.85rem; }
+.empty { color:var(--muted); }
+.week { display:grid; gap:.5rem; }
+.day { display:flex; align-items:center; gap:.75rem; padding:.75rem 1rem;
+  background:#fff; border:1px solid var(--line); border-radius:8px; }
+.day .name { width:6.5rem; color:var(--muted); }
+.day.today { border-color:var(--accent); }
+.error { color:#a11; }
+.field { display:block; margin-bottom:1rem; }
+.field span { display:block; font-size:.85rem; color:var(--muted); margin-bottom:.25rem; }
+.field input, .field textarea { width:100%; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#1b1a18; --fg:#ece8e2; --muted:#9a938c; --line:#35322e; --accent:#e0813f; }
+  input, select, textarea, button, .card, .day, .chip { background:#232120; }
+}

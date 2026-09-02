@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<form class="filters" hx-get="/" hx-target="#list" hx-trigger="input changed delay:200ms from:#q, change from:#sort">
+  <input id="q" name="q" type="search" placeholder="Search recipes" value="{{ q }}">
+  <select id="sort" name="sort">
+    <option value="newest" {% if sort == 'newest' %}selected{% endif %}>Newest</option>
+    <option value="title"  {% if sort == 'title'  %}selected{% endif %}>Title</option>
+    <option value="rating" {% if sort == 'rating' %}selected{% endif %}>Rating</option>
+  </select>
+  <input type="hidden" name="tag" value="{{ tag }}">
+  <noscript><button type="submit">Go</button></noscript>
+</form>
+
+<div class="chips">
+  <a href="/?q={{ q }}&sort={{ sort }}" class="chip {% if not tag %}on{% endif %}">All</a>
+  {% for t in tags %}
+    <a href="/?q={{ q }}&sort={{ sort }}&tag={{ t }}" class="chip {% if t == tag %}on{% endif %}">{{ t }}</a>
+  {% endfor %}
+</div>
+
+<div id="list">{% include "_list.html" %}</div>
+{% endblock %}

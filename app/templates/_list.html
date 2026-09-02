@@ -1,0 +1,13 @@
+{% if not recipes %}
+  <p class="empty">No recipes yet. <a href="/recipe/new">Add one</a>.</p>
+{% else %}
+  <ul class="cards">
+    {% for r in recipes %}
+      <li class="card">
+        <a href="/recipe/{{ r['id'] }}">{{ r['title'] }}</a>
+        <span class="stars">{{ stars(r['rating']) }}</span>
+        {% if r['tags'] %}<span class="tags">{{ r['tags'] }}</span>{% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+{% endif %}
