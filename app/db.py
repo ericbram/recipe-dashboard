@@ -1,7 +1,7 @@
 """SQLite access for the recipe dashboard. Plain sqlite3, no ORM."""
 
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS recipes (
@@ -166,4 +166,32 @@ def set_rating(conn: sqlite3.Connection, recipe_id: int, rating: int | None) -> 
     if rating is not None and not 1 <= int(rating) <= 5:
         raise ValueError(f"rating must be 1-5 or None, got {rating!r}")
     conn.execute("UPDATE recipes SET rating = ? WHERE id = ?", (rating, recipe_id))
+    conn.commit()
+
+
+def week_start(d: date) -> date:
+    return d - timedelta(days=d.weekday())
+
+
+def get_plan(conn: sqlite3.Connection, start: date) -> list[tuple[date, sqlite3.Row | None]]:
+    days = [start + timedelta(days=i) for i in range(7)]
+    rows = conn.execute(
+        """SELECT p.date AS day, r.*
+             FROM plan p JOIN recipes r ON r.id = p.recipe_id
+            WHERE p.date BETWEEN ? AND ?""",
+        (days[0].isoformat(), days[-1].isoformat()),
+    ).fetchall()
+    by_day = {date.fromisoformat(r["day"]): r for r in rows}
+    return [(d, by_day.get(d)) for d in days]
+
+
+def set_plan(conn: sqlite3.Connection, d: date, recipe_id: int | None) -> None:
+    if recipe_id is None:
+        conn.execute("DELETE FROM plan WHERE date = ?", (d.isoformat(),))
+    else:
+        conn.execute(
+            "INSERT INTO plan (date, recipe_id) VALUES (?, ?) "
+            "ON CONFLICT(date) DO UPDATE SET recipe_id = excluded.recipe_id",
+            (d.isoformat(), recipe_id),
+        )
     conn.commit()

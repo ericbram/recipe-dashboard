@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import date, timedelta
 
 import pytest
 
@@ -176,3 +177,47 @@ def test_set_rating_rejects_out_of_range(conn, bad):
     rid = db.create_recipe(conn, "Chili")
     with pytest.raises(ValueError):
         db.set_rating(conn, rid, bad)
+
+
+def test_week_start_returns_monday():
+    assert db.week_start(date(2026, 9, 3)) == date(2026, 8, 31)   # Thursday -> Monday
+    assert db.week_start(date(2026, 8, 31)) == date(2026, 8, 31)  # Monday -> itself
+    assert db.week_start(date(2026, 9, 6)) == date(2026, 8, 31)   # Sunday -> Monday
+
+
+def test_get_plan_returns_seven_days(conn):
+    week = db.get_plan(conn, date(2026, 8, 31))
+    expected = [date(2026, 8, 31) + timedelta(days=i) for i in range(7)]
+    assert [d for d, _ in week] == expected
+    assert all(recipe is None for _, recipe in week)
+
+
+def test_set_and_read_plan(conn):
+    rid = db.create_recipe(conn, "Chili")
+    db.set_plan(conn, date(2026, 9, 2), rid)
+    week = dict(db.get_plan(conn, date(2026, 8, 31)))
+    assert week[date(2026, 9, 2)]["title"] == "Chili"
+    assert week[date(2026, 9, 1)] is None
+
+
+def test_set_plan_replaces_existing_day(conn):
+    a = db.create_recipe(conn, "Chili")
+    b = db.create_recipe(conn, "Stew")
+    db.set_plan(conn, date(2026, 9, 2), a)
+    db.set_plan(conn, date(2026, 9, 2), b)
+    week = dict(db.get_plan(conn, date(2026, 8, 31)))
+    assert week[date(2026, 9, 2)]["title"] == "Stew"
+
+
+def test_set_plan_none_clears_day(conn):
+    rid = db.create_recipe(conn, "Chili")
+    db.set_plan(conn, date(2026, 9, 2), rid)
+    db.set_plan(conn, date(2026, 9, 2), None)
+    assert dict(db.get_plan(conn, date(2026, 8, 31)))[date(2026, 9, 2)] is None
+
+
+def test_deleting_recipe_clears_it_from_plan(conn):
+    rid = db.create_recipe(conn, "Chili")
+    db.set_plan(conn, date(2026, 9, 2), rid)
+    db.delete_recipe(conn, rid)
+    assert dict(db.get_plan(conn, date(2026, 8, 31)))[date(2026, 9, 2)] is None
