@@ -494,7 +494,7 @@ def list_recipes(
     q: str | None = None,
     tag: str | None = None,
     sort: str = "newest",
-) -> list[sqlite3.Row]:
+) -> list[dict]:
     where, params = [], []
     if q:
         where.append("r.title LIKE ?")
