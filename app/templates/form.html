@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit recipe' if recipe_id else 'Add recipe' }}{% endblock %}
+{% block content %}
+<h1>{{ 'Edit recipe' if recipe_id else 'Add recipe' }}</h1>
+
+{% if not recipe_id %}
+<form method="post" action="/import" class="filters">
+  <input name="url" type="url" placeholder="Paste a recipe URL to import" value="{{ source_url }}">
+  <button type="submit">Import</button>
+</form>
+{% endif %}
+
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+<form method="post" action="{{ '/recipe/' ~ recipe_id if recipe_id else '/recipe/new' }}">
+  <label class="field"><span>Title</span><input name="title" value="{{ title }}" required></label>
+  <label class="field"><span>Tags (comma separated)</span><input name="tags" value="{{ tags }}"></label>
+  <label class="field"><span>Ingredients (one per line)</span><textarea name="ingredients">{{ ingredients }}</textarea></label>
+  <label class="field"><span>Steps (one per line)</span><textarea name="steps">{{ steps }}</textarea></label>
+  <label class="field"><span>Notes</span><textarea name="notes">{{ notes }}</textarea></label>
+  <label class="field"><span>Source URL</span><input name="source_url" value="{{ source_url }}"></label>
+  <button type="submit">Save</button>
+</form>
+{% endblock %}

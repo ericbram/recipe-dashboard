@@ -66,3 +66,101 @@ def test_stars_renders_rating(client):
     rid = db.create_recipe(client.conn, "Chili")
     db.set_rating(client.conn, rid, 3)
     assert "★★★☆☆" in client.get("/").text
+
+
+def test_create_recipe_via_form(client):
+    resp = client.post(
+        "/recipe/new",
+        data={"title": "Chili", "ingredients": "beans", "steps": "cook",
+              "notes": "", "source_url": "", "tags": "dinner, spicy"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert "Chili" in resp.text
+    assert db.list_recipes(client.conn)[0]["tags"] == "dinner, spicy"
+
+
+def test_create_requires_a_title(client):
+    resp = client.post(
+        "/recipe/new",
+        data={"title": "  ", "ingredients": "", "steps": "", "notes": "",
+              "source_url": "", "tags": ""},
+    )
+    assert resp.status_code == 400
+    assert "Title is required" in resp.text
+    assert db.list_recipes(client.conn) == []
+
+
+def test_recipe_detail_shows_fields(client):
+    rid = db.create_recipe(client.conn, "Chili", ingredients="beans", steps="cook")
+    body = client.get(f"/recipe/{rid}").text
+    assert "Chili" in body and "beans" in body and "cook" in body
+
+
+def test_missing_recipe_is_404(client):
+    resp = client.get("/recipe/999")
+    assert resp.status_code == 404
+    assert "Recipe not found" in resp.text
+    assert "<html" in resp.text.lower()  # an HTML page, not FastAPI's JSON default
+
+
+def test_edit_recipe(client):
+    rid = db.create_recipe(client.conn, "Chili", tags=["dinner"])
+    client.post(
+        f"/recipe/{rid}",
+        data={"title": "Better Chili", "ingredients": "beans", "steps": "cook",
+              "notes": "", "source_url": "", "tags": "dinner, quick"},
+        follow_redirects=True,
+    )
+    assert db.get_recipe(client.conn, rid)["title"] == "Better Chili"
+    assert db.get_tags(client.conn, rid) == ["dinner", "quick"]
+
+
+def test_rate_returns_star_fragment(client):
+    rid = db.create_recipe(client.conn, "Chili")
+    resp = client.post(f"/recipe/{rid}/rate", data={"rating": "4"},
+                       headers={"HX-Request": "true"})
+    assert resp.status_code == 200
+    assert "★★★★☆" in resp.text
+    assert db.get_recipe(client.conn, rid)["rating"] == 4
+
+
+def test_rate_zero_clears_the_rating(client):
+    rid = db.create_recipe(client.conn, "Chili")
+    db.set_rating(client.conn, rid, 5)
+    client.post(f"/recipe/{rid}/rate", data={"rating": "0"}, headers={"HX-Request": "true"})
+    assert db.get_recipe(client.conn, rid)["rating"] is None
+
+
+def test_rate_rejects_out_of_range(client):
+    rid = db.create_recipe(client.conn, "Chili")
+    assert client.post(f"/recipe/{rid}/rate", data={"rating": "9"}).status_code == 400
+
+
+def test_delete_recipe(client):
+    rid = db.create_recipe(client.conn, "Chili")
+    resp = client.post(f"/recipe/{rid}/delete", follow_redirects=True)
+    assert resp.status_code == 200
+    assert db.get_recipe(client.conn, rid) is None
+
+
+def test_import_prefills_the_form(client, monkeypatch):
+    from app import importer
+
+    monkeypatch.setattr(
+        main.importer, "fetch_recipe",
+        lambda url: importer.ImportedRecipe(
+            title="Weeknight Chili", ingredients="beef\nbeans", steps="cook",
+            tags=["dinner"], source_url=url),
+    )
+    body = client.post("/import", data={"url": "https://example.com/chili"}).text
+    assert "Weeknight Chili" in body
+    assert "beef" in body
+    assert "dinner" in body
+
+
+def test_failed_import_keeps_the_url_and_explains(client, monkeypatch):
+    monkeypatch.setattr(main.importer, "fetch_recipe", lambda url: None)
+    body = client.post("/import", data={"url": "https://example.com/nope"}).text
+    assert "https://example.com/nope" in body
+    assert "Could not read a recipe" in body

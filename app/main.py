@@ -2,12 +2,12 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app import db
+from app import db, importer
 
 BASE_DIR = Path(__file__).parent
 DB_PATH = os.environ.get("DB_PATH", "./recipes.db")
@@ -65,3 +65,118 @@ def index(request: Request, q: str = "", tag: str = "", sort: str = "newest", co
     # Full page normally; the bare list fragment when HTMX asks for it.
     name = "_list.html" if request.headers.get("HX-Request") else "index.html"
     return templates.TemplateResponse(request, name, ctx)
+
+
+@app.exception_handler(HTTPException)
+async def http_error(request: Request, exc: HTTPException):
+    return templates.TemplateResponse(
+        request, "error.html",
+        {"status": exc.status_code, "detail": exc.detail},
+        status_code=exc.status_code,
+    )
+
+
+def _split_tags(raw: str) -> list[str]:
+    return [t.strip() for t in (raw or "").split(",") if t.strip()]
+
+
+def _form_ctx(**over):
+    ctx = {"title": "", "ingredients": "", "steps": "", "notes": "",
+           "source_url": "", "tags": "", "recipe_id": None, "error": None}
+    ctx.update(over)
+    return ctx
+
+
+@app.get("/recipe/new", response_class=HTMLResponse)
+def new_recipe_form(request: Request):
+    return templates.TemplateResponse(request, "form.html", _form_ctx())
+
+
+@app.post("/recipe/new")
+def create_recipe(
+    request: Request,
+    title: str = Form(""),
+    ingredients: str = Form(""),
+    steps: str = Form(""),
+    notes: str = Form(""),
+    source_url: str = Form(""),
+    tags: str = Form(""),
+    conn=Depends(get_db),
+):
+    if not title.strip():
+        ctx = _form_ctx(title=title, ingredients=ingredients, steps=steps,
+                        notes=notes, source_url=source_url, tags=tags,
+                        error="Title is required.")
+        return templates.TemplateResponse(request, "form.html", ctx, status_code=400)
+    rid = db.create_recipe(conn, title.strip(), ingredients=ingredients, steps=steps,
+                           notes=notes, source_url=source_url or None,
+                           tags=_split_tags(tags))
+    return RedirectResponse(f"/recipe/{rid}", status_code=303)
+
+
+@app.get("/recipe/{recipe_id}", response_class=HTMLResponse)
+def recipe_detail(request: Request, recipe_id: int, conn=Depends(get_db)):
+    row = db.get_recipe(conn, recipe_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return templates.TemplateResponse(
+        request, "recipe.html",
+        {"r": row, "tags": db.get_tags(conn, recipe_id)},
+    )
+
+
+@app.post("/recipe/{recipe_id}")
+def edit_recipe(
+    request: Request,
+    recipe_id: int,
+    title: str = Form(""),
+    ingredients: str = Form(""),
+    steps: str = Form(""),
+    notes: str = Form(""),
+    source_url: str = Form(""),
+    tags: str = Form(""),
+    conn=Depends(get_db),
+):
+    if db.get_recipe(conn, recipe_id) is None:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    if not title.strip():
+        ctx = _form_ctx(title=title, ingredients=ingredients, steps=steps,
+                        notes=notes, source_url=source_url, tags=tags,
+                        recipe_id=recipe_id, error="Title is required.")
+        return templates.TemplateResponse(request, "form.html", ctx, status_code=400)
+    db.update_recipe(conn, recipe_id, title=title.strip(), ingredients=ingredients,
+                     steps=steps, notes=notes, source_url=source_url or None,
+                     tags=_split_tags(tags))
+    return RedirectResponse(f"/recipe/{recipe_id}", status_code=303)
+
+
+@app.post("/recipe/{recipe_id}/rate", response_class=HTMLResponse)
+def rate_recipe(request: Request, recipe_id: int, rating: int = Form(...), conn=Depends(get_db)):
+    if db.get_recipe(conn, recipe_id) is None:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    try:
+        db.set_rating(conn, recipe_id, rating or None)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return templates.TemplateResponse(
+        request, "_stars.html", {"r": db.get_recipe(conn, recipe_id)},
+    )
+
+
+@app.post("/recipe/{recipe_id}/delete")
+def remove_recipe(recipe_id: int, conn=Depends(get_db)):
+    db.delete_recipe(conn, recipe_id)
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/import", response_class=HTMLResponse)
+def import_recipe(request: Request, url: str = Form("")):
+    found = importer.fetch_recipe(url) if url.strip() else None
+    if found is None:
+        ctx = _form_ctx(source_url=url,
+                        error="Could not read a recipe from that page. Fill it in below.")
+    else:
+        ctx = _form_ctx(title=found.title, ingredients=found.ingredients,
+                        steps=found.steps, tags=", ".join(found.tags),
+                        source_url=found.source_url)
+    return templates.TemplateResponse(request, "form.html", ctx)

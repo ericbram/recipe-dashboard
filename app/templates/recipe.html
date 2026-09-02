@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ r['title'] }}{% endblock %}
+{% block content %}
+<h1>{{ r['title'] }}</h1>
+{% include "_stars.html" %}
+{% if tags %}<p class="tags">{{ tags | join(', ') }}</p>{% endif %}
+{% if r['source_url'] %}<p><a href="{{ r['source_url'] }}" rel="noreferrer">Original recipe</a></p>{% endif %}
+
+<h2>Ingredients</h2>
+<ul>{% for line in r['ingredients'].splitlines() %}{% if line.strip() %}<li>{{ line }}</li>{% endif %}{% endfor %}</ul>
+
+<h2>Steps</h2>
+<ol>{% for line in r['steps'].splitlines() %}{% if line.strip() %}<li>{{ line }}</li>{% endif %}{% endfor %}</ol>
+
+{% if r['notes'] %}<h2>Notes</h2><p>{{ r['notes'] }}</p>{% endif %}
+
+<details>
+  <summary>Edit</summary>
+  <form method="post" action="/recipe/{{ r['id'] }}">
+    <label class="field"><span>Title</span><input name="title" value="{{ r['title'] }}" required></label>
+    <label class="field"><span>Tags (comma separated)</span><input name="tags" value="{{ tags | join(', ') }}"></label>
+    <label class="field"><span>Ingredients (one per line)</span><textarea name="ingredients">{{ r['ingredients'] }}</textarea></label>
+    <label class="field"><span>Steps (one per line)</span><textarea name="steps">{{ r['steps'] }}</textarea></label>
+    <label class="field"><span>Notes</span><textarea name="notes">{{ r['notes'] }}</textarea></label>
+    <label class="field"><span>Source URL</span><input name="source_url" value="{{ r['source_url'] or '' }}"></label>
+    <button type="submit">Save</button>
+  </form>
+</details>
+
+<form method="post" action="/recipe/{{ r['id'] }}/delete"
+      onsubmit="return confirm('Delete {{ r['title'] }}?')">
+  <button type="submit">Delete recipe</button>
+</form>
+{% endblock %}
