@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Week of {{ start.strftime('%b %-d') }}{% endblock %}
+{% block content %}
+<h1>Week of {{ start.strftime('%B %-d') }}</h1>
+<p class="chips">
+  <a class="chip" href="/plan?week={{ prev.isoformat() }}">← Previous</a>
+  <a class="chip" href="/plan">This week</a>
+  <a class="chip" href="/plan?week={{ next.isoformat() }}">Next →</a>
+</p>
+<div class="week">
+  {% for day, recipe in week %}
+    {% include "_day.html" %}
+  {% endfor %}
+</div>
+{% endblock %}

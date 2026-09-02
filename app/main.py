@@ -1,5 +1,6 @@
 import os
 from contextlib import asynccontextmanager
+from datetime import date, timedelta
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
@@ -180,3 +181,44 @@ def import_recipe(request: Request, url: str = Form("")):
                         steps=found.steps, tags=", ".join(found.tags),
                         source_url=found.source_url)
     return templates.TemplateResponse(request, "form.html", ctx)
+
+
+def _parse_date(raw: str) -> date:
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Not a date: {raw!r}")
+
+
+@app.get("/plan", response_class=HTMLResponse)
+def plan_week(request: Request, week: str = "", conn=Depends(get_db)):
+    anchor = _parse_date(week) if week else date.today()
+    start = db.week_start(anchor)
+    return templates.TemplateResponse(
+        request, "plan.html",
+        {
+            "week": db.get_plan(conn, start),
+            "start": start,
+            "prev": start - timedelta(days=7),
+            "next": start + timedelta(days=7),
+            "today": date.today(),
+            "recipes": db.list_recipes(conn, sort="title"),
+        },
+    )
+
+
+@app.post("/plan/{day}", response_class=HTMLResponse)
+def assign_day(request: Request, day: str, recipe_id: str = Form(""), conn=Depends(get_db)):
+    d = _parse_date(day)
+    rid = int(recipe_id) if recipe_id.strip() else None
+    if rid is not None and db.get_recipe(conn, rid) is None:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    db.set_plan(conn, d, rid)
+    if not request.headers.get("HX-Request"):
+        return RedirectResponse(f"/plan?week={d.isoformat()}", status_code=303)
+    planned = dict(db.get_plan(conn, db.week_start(d)))[d]
+    return templates.TemplateResponse(
+        request, "_day.html",
+        {"day": d, "recipe": planned, "today": date.today(),
+         "recipes": db.list_recipes(conn, sort="title")},
+    )

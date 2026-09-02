@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -189,3 +191,43 @@ def test_title_cannot_break_out_of_delete_confirm_js(client):
     body = client.get(f"/recipe/{rid}").text
     onsubmit = body.split('onsubmit="')[1].split('"')[0]
     assert "alert(1)" not in onsubmit
+
+
+def test_plan_shows_seven_days(client):
+    body = client.get("/plan", params={"week": "2026-09-03"}).text
+    for name in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]:
+        assert name in body
+
+
+def test_plan_defaults_to_this_week(client):
+    assert client.get("/plan").status_code == 200
+
+
+def test_assign_a_recipe_to_a_day(client):
+    rid = db.create_recipe(client.conn, "Chili")
+    resp = client.post("/plan/2026-09-02", data={"recipe_id": str(rid)},
+                       headers={"HX-Request": "true"})
+    assert resp.status_code == 200
+    assert "Chili" in resp.text
+    assert dict(db.get_plan(client.conn, date(2026, 8, 31)))[date(2026, 9, 2)]["title"] == "Chili"
+
+
+def test_clear_a_day(client):
+    rid = db.create_recipe(client.conn, "Chili")
+    db.set_plan(client.conn, date(2026, 9, 2), rid)
+    client.post("/plan/2026-09-02", data={"recipe_id": ""}, headers={"HX-Request": "true"})
+    assert dict(db.get_plan(client.conn, date(2026, 8, 31)))[date(2026, 9, 2)] is None
+
+
+def test_plan_renders_the_assigned_recipe(client):
+    rid = db.create_recipe(client.conn, "Weeknight Chili")
+    db.set_plan(client.conn, date(2026, 9, 2), rid)
+    assert "Weeknight Chili" in client.get("/plan", params={"week": "2026-09-03"}).text
+
+
+def test_bad_week_param_is_400(client):
+    assert client.get("/plan", params={"week": "not-a-date"}).status_code == 400
+
+
+def test_bad_plan_date_is_400(client):
+    assert client.post("/plan/nonsense", data={"recipe_id": ""}).status_code == 400
