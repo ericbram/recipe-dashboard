@@ -121,7 +121,12 @@ def test_rate_returns_star_fragment(client):
     resp = client.post(f"/recipe/{rid}/rate", data={"rating": "4"},
                        headers={"HX-Request": "true"})
     assert resp.status_code == 200
-    assert "★★★★☆" in resp.text
+    # Each star is its own button; count glyphs among the rating buttons
+    # rather than asserting a contiguous run (the ✕ clear button's glyph
+    # must not be counted as a star).
+    rating_buttons = resp.text.split('title="Clear rating"')[0]
+    assert rating_buttons.count("★") == 4
+    assert rating_buttons.count("☆") == 1
     assert db.get_recipe(client.conn, rid)["rating"] == 4
 
 
@@ -164,3 +169,23 @@ def test_failed_import_keeps_the_url_and_explains(client, monkeypatch):
     body = client.post("/import", data={"url": "https://example.com/nope"}).text
     assert "https://example.com/nope" in body
     assert "Could not read a recipe" in body
+
+
+def test_javascript_scheme_source_url_is_not_linked(client):
+    rid = db.create_recipe(client.conn, "Chili", source_url="javascript:alert(1)")
+    body = client.get(f"/recipe/{rid}").text
+    assert 'href="javascript:' not in body
+
+
+def test_http_source_url_is_linked(client):
+    rid = db.create_recipe(client.conn, "Chili", source_url="https://example.com/x")
+    body = client.get(f"/recipe/{rid}").text
+    assert 'href="https://example.com/x"' in body
+
+
+def test_title_cannot_break_out_of_delete_confirm_js(client):
+    evil = "x'); alert(1); //"
+    rid = db.create_recipe(client.conn, evil)
+    body = client.get(f"/recipe/{rid}").text
+    onsubmit = body.split('onsubmit="')[1].split('"')[0]
+    assert "alert(1)" not in onsubmit

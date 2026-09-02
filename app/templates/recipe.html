@@ -4,7 +4,7 @@
 <h1>{{ r['title'] }}</h1>
 {% include "_stars.html" %}
 {% if tags %}<p class="tags">{{ tags | join(', ') }}</p>{% endif %}
-{% if r['source_url'] %}<p><a href="{{ r['source_url'] }}" rel="noreferrer">Original recipe</a></p>{% endif %}
+{% if r['source_url'] and (r['source_url'].startswith('http://') or r['source_url'].startswith('https://')) %}<p><a href="{{ r['source_url'] }}" rel="noreferrer">Original recipe</a></p>{% endif %}
 
 <h2>Ingredients</h2>
 <ul>{% for line in r['ingredients'].splitlines() %}{% if line.strip() %}<li>{{ line }}</li>{% endif %}{% endfor %}</ul>
@@ -28,7 +28,7 @@
 </details>
 
 <form method="post" action="/recipe/{{ r['id'] }}/delete"
-      onsubmit="return confirm('Delete {{ r['title'] }}?')">
+      onsubmit="return confirm('Delete this recipe?')">
   <button type="submit">Delete recipe</button>
 </form>
 {% endblock %}
