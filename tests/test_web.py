@@ -212,6 +212,18 @@ def test_assign_a_recipe_to_a_day(client):
     assert dict(db.get_plan(client.conn, date(2026, 8, 31)))[date(2026, 9, 2)]["title"] == "Chili"
 
 
+def test_assign_without_hx_header_redirects(client):
+    rid = db.create_recipe(client.conn, "Chili")
+    resp = client.post("/plan/2026-09-02", data={"recipe_id": str(rid)}, follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/plan?week=2026-09-02"
+    assert dict(db.get_plan(client.conn, date(2026, 8, 31)))[date(2026, 9, 2)]["title"] == "Chili"
+
+
+def test_non_numeric_recipe_id_is_400(client):
+    assert client.post("/plan/2026-09-02", data={"recipe_id": "abc"}).status_code == 400
+
+
 def test_clear_a_day(client):
     rid = db.create_recipe(client.conn, "Chili")
     db.set_plan(client.conn, date(2026, 9, 2), rid)

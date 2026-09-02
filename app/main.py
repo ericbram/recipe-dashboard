@@ -210,7 +210,13 @@ def plan_week(request: Request, week: str = "", conn=Depends(get_db)):
 @app.post("/plan/{day}", response_class=HTMLResponse)
 def assign_day(request: Request, day: str, recipe_id: str = Form(""), conn=Depends(get_db)):
     d = _parse_date(day)
-    rid = int(recipe_id) if recipe_id.strip() else None
+    if recipe_id.strip():
+        try:
+            rid = int(recipe_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Not a recipe id: {recipe_id!r}")
+    else:
+        rid = None
     if rid is not None and db.get_recipe(conn, rid) is None:
         raise HTTPException(status_code=404, detail="Recipe not found")
     db.set_plan(conn, d, rid)
