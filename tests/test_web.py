@@ -278,3 +278,171 @@ def test_bad_week_param_is_400(client):
 
 def test_bad_plan_date_is_400(client):
     assert client.post("/plan/nonsense", data={"recipe_id": ""}).status_code == 400
+
+
+def test_htmx_error_returns_a_bare_message_not_a_page(client):
+    """htmx will not swap a non-2xx page, so errors must come back as text."""
+    resp = client.post(
+        "/plan/2026-09-07",
+        data={"recipe_id": "9999"},
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 404
+    assert resp.text == "Recipe not found"
+    assert "<!doctype" not in resp.text.lower()
+
+
+def test_non_htmx_error_still_renders_the_full_page(client):
+    resp = client.post("/plan/2026-09-07", data={"recipe_id": "9999"})
+    assert resp.status_code == 404
+    assert "<!doctype" in resp.text.lower()
+
+
+def test_paste_import_prefills_the_form(client):
+    blob = '{"title": "Pasted Pie", "ingredients": ["Apples"], "tags": ["dessert"], "notes": "Serves 6."}'
+    resp = client.post("/import/paste", data={"recipe": blob})
+    assert resp.status_code == 200
+    assert 'value="Pasted Pie"' in resp.text
+    assert "Apples" in resp.text
+    assert "dessert" in resp.text
+    assert "Serves 6." in resp.text
+
+
+def test_paste_import_of_junk_returns_the_form_with_an_error(client):
+    resp = client.post("/import/paste", data={"recipe": "nonsense"})
+    assert resp.status_code == 200
+    assert "did not parse as recipe JSON" in resp.text
+
+
+def test_pasted_recipe_can_be_saved(client):
+    """The end-to-end path: paste blob -> prefilled form -> saved recipe."""
+    client.post("/import/paste", data={"recipe": '{"title": "Pasted Pie"}'})
+    resp = client.post("/recipe/new", data={"title": "Pasted Pie", "tags": "dessert"},
+                       follow_redirects=True)
+    assert resp.status_code == 200
+    assert "Pasted Pie" in resp.text
+
+
+def test_api_create_returns_the_new_recipe(client):
+    resp = client.post("/api/recipes", json={
+        "title": "API Tacos",
+        "ingredients": ["Tortillas", "Carnitas"],
+        "steps": "Warm the tortillas.",
+        "tags": ["Dinner", "pork"],
+        "notes": "Serves 4.",
+        "source_url": "https://example.com/tacos",
+    })
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["title"] == "API Tacos"
+    assert body["url"] == f"/recipe/{body['id']}"
+
+    page = client.get(body["url"])
+    assert page.status_code == 200
+    assert "Carnitas" in page.text
+    assert "Serves 4." in page.text
+    assert "dinner, pork" in page.text
+
+
+def test_api_rejects_a_body_with_no_title(client):
+    resp = client.post("/api/recipes", json={"steps": "Do a thing."})
+    assert resp.status_code == 400
+    assert resp.json() == {"error": "Needs at least a non-empty title"}
+
+
+def test_api_errors_are_json_not_an_html_page(client):
+    """The error handler must not hand an API client a rendered error page."""
+    resp = client.post("/api/recipes", content=b"not json",
+                       headers={"Content-Type": "application/json"})
+    assert resp.status_code == 400
+    assert resp.json() == {"error": "Body must be JSON"}
+    assert "<!doctype" not in resp.text.lower()
+
+
+def test_api_create_is_still_blocked_cross_origin(client):
+    resp = client.post("/api/recipes", json={"title": "Evil Pie"},
+                       headers={"Origin": "https://evil.example"})
+    assert resp.status_code == 403
+
+
+def _stock_the_week(client):
+    beef = client.post("/api/recipes", json={
+        "title": "Chili", "ingredients": ["1 lb ground beef", "1 onion, diced"]}).json()
+    soup = client.post("/api/recipes", json={
+        "title": "Soup", "ingredients": ["1 onion, diced", "4 cups stock"]}).json()
+    client.post("/plan/2026-08-31", data={"recipe_id": str(beef["id"])})
+    client.post("/plan/2026-09-02", data={"recipe_id": str(soup["id"])})
+    return beef, soup
+
+
+def test_grocery_page_lists_the_weeks_ingredients(client):
+    _stock_the_week(client)
+    resp = client.get("/grocery?week=2026-09-01")
+    assert resp.status_code == 200
+    assert "1 lb ground beef" in resp.text
+    assert "4 cups stock" in resp.text
+    # The shared onion is one row, credited to both dinners. Count the
+    # checkbox, which is emitted exactly once per item.
+    assert resp.text.count('value="1 onion, diced"') == 1
+    assert resp.text.count('type="checkbox"') == 3
+    assert "Chili, Soup" in resp.text
+    assert "3 items for 2 dinners" in resp.text
+
+
+def test_grocery_page_is_empty_when_nothing_is_planned(client):
+    resp = client.get("/grocery?week=2026-09-01")
+    assert resp.status_code == 200
+    assert "Nothing planned this week yet" in resp.text
+
+
+def test_grocery_page_rejects_a_bad_week(client):
+    assert client.get("/grocery?week=not-a-date").status_code == 400
+
+
+def test_plan_page_links_to_the_grocery_list(client):
+    resp = client.get("/plan?week=2026-09-01")
+    assert '/grocery?week=2026-08-31' in resp.text
+
+
+def test_grocery_api_reports_what_needs_sorting(client):
+    _stock_the_week(client)
+    body = client.get("/api/grocery?week=2026-09-01").json()
+    assert body["week_start"] == "2026-08-31"
+    assert "meat" in body["aisles"]
+    assert sorted(body["unsorted_keys"]) == ["ground beef", "onion diced", "stock"]
+    beef = next(i for i in body["items"] if i["line"] == "1 lb ground beef")
+    assert beef == {"line": "1 lb ground beef", "key": "ground beef",
+                    "aisle": "unsorted", "sources": ["Chili"]}
+
+
+def test_learned_aisles_apply_and_shrink_the_next_run(client):
+    _stock_the_week(client)
+    resp = client.post("/api/aisles", json={"ground beef": "meat", "onion diced": "produce"})
+    assert resp.status_code == 200
+    assert resp.json() == {"learned": 2, "known": 2}
+
+    body = client.get("/api/grocery?week=2026-09-01").json()
+    assert body["unsorted_keys"] == ["stock"]
+
+    page = client.get("/grocery?week=2026-09-01")
+    assert "1 not yet in an aisle" in page.text
+    assert page.text.index("produce") < page.text.index("meat") < page.text.index("unsorted")
+
+
+def test_a_relearned_aisle_overwrites_rather_than_duplicating(client):
+    client.post("/api/aisles", json={"capers": "produce"})
+    resp = client.post("/api/aisles", json={"capers": "pantry"})
+    assert resp.json() == {"learned": 1, "known": 1}
+    assert db.get_aisles(client.conn) == {"capers": "pantry"}
+
+
+def test_aisles_api_rejects_a_name_outside_the_vocabulary(client):
+    resp = client.post("/api/aisles", json={"beef": "butcher counter"})
+    assert resp.status_code == 400
+    assert "butcher counter" in resp.json()["error"]
+    assert db.get_aisles(client.conn) == {}, "a rejected batch must write nothing"
+
+
+def test_aisles_api_rejects_an_empty_or_non_object_body(client):
+    assert client.post("/api/aisles", json={}).status_code == 400
+    assert client.post("/api/aisles", json=["beef", "meat"]).status_code == 400

@@ -104,3 +104,65 @@ def test_malformed_json_followed_by_valid_recipe():
     r = importer.parse_recipe(html)
     assert r is not None
     assert r.title == "Found It"
+
+
+def test_refuses_to_fetch_loopback():
+    """The SSRF guard: no request should ever leave for a private address."""
+    assert importer.fetch_recipe("http://127.0.0.1:1/anything") is None
+    assert importer.fetch_recipe("http://localhost:1/anything") is None
+    assert importer.fetch_recipe("http://192.168.1.1/router/admin") is None
+
+
+def test_block_private_hook_rejects_private_and_allows_public():
+    import httpx
+    import pytest
+
+    with pytest.raises(ValueError):
+        importer._block_private(httpx.Request("GET", "http://169.254.169.254/latest/meta-data/"))
+    with pytest.raises(ValueError):
+        importer._block_private(httpx.Request("GET", "file:///etc/passwd"))
+    # A public literal passes the same hook, so the guard is not simply
+    # rejecting everything.
+    importer._block_private(httpx.Request("GET", "http://93.184.216.34/recipe"))
+
+
+def test_parses_pasted_json():
+    blob = """
+    {"title": "Skillet Cornbread",
+     "source_url": "https://example.com/cornbread",
+     "ingredients": ["1 cup cornmeal", "1 cup buttermilk"],
+     "steps": ["Heat the skillet.", "Bake 25 minutes."],
+     "tags": ["Side", "baking"],
+     "notes": "Serves 8."}
+    """
+    r = importer.parse_pasted(blob)
+    assert r is not None
+    assert r.title == "Skillet Cornbread"
+    assert r.ingredients == "1 cup cornmeal\n1 cup buttermilk"
+    assert r.steps == "Heat the skillet.\nBake 25 minutes."
+    assert r.tags == ["baking", "side"]
+    assert r.notes == "Serves 8."
+    assert r.source_url == "https://example.com/cornbread"
+
+
+def test_pasted_json_tolerates_a_copied_code_fence():
+    fenced = '```json\n{"title": "Fenced Toast", "steps": "Toast it."}\n```'
+    r = importer.parse_pasted(fenced)
+    assert r is not None
+    assert r.title == "Fenced Toast"
+    assert r.steps == "Toast it."
+
+
+def test_pasted_json_accepts_strings_where_lists_are_expected():
+    r = importer.parse_pasted('{"title": "Toast", "ingredients": "Bread", "tags": "breakfast"}')
+    assert r is not None
+    assert r.ingredients == "Bread"
+    assert r.tags == ["breakfast"]
+
+
+def test_pasted_junk_returns_none():
+    assert importer.parse_pasted("not json at all") is None
+    assert importer.parse_pasted("") is None
+    assert importer.parse_pasted("[1, 2, 3]") is None          # not an object
+    assert importer.parse_pasted('{"steps": "no title"}') is None
+    assert importer.parse_pasted('{"title": "   "}') is None

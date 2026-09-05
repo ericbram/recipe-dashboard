@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .venv/
 *.db
+*.db.bak
 *.db-wal
 *.db-shm
 .DS_Store

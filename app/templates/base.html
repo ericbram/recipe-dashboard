@@ -13,6 +13,17 @@
     <a href="/plan">This week</a>
     <a href="/recipe/new" class="primary">Add recipe</a>
   </nav>
+  <div id="flash" class="error" role="alert" hidden></div>
   <main>{% block content %}{% endblock %}</main>
+  <script>
+    document.body.addEventListener('htmx:responseError', function (e) {
+      var flash = document.getElementById('flash');
+      flash.textContent = e.detail.xhr.responseText || ('Error ' + e.detail.xhr.status);
+      flash.hidden = false;
+    });
+    document.body.addEventListener('htmx:beforeRequest', function () {
+      document.getElementById('flash').hidden = true;
+    });
+  </script>
 </body>
 </html>

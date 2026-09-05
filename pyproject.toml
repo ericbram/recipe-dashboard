@@ -2,16 +2,18 @@
 name = "recipe-dashboard"
 version = "0.1.0"
 requires-python = ">=3.11"
+# Upper bounds so a rebuild years from now cannot pull a major and break an
+# appliance whose owner changed nothing. Raise them deliberately.
 dependencies = [
-    "fastapi",
-    "uvicorn[standard]",
-    "jinja2",
-    "python-multipart",
-    "httpx",
+    "fastapi>=0.141,<1",
+    "uvicorn[standard]>=0.52,<1",
+    "jinja2>=3.1,<4",
+    "python-multipart>=0.0.32,<1",
+    "httpx>=0.28,<1",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest>=9,<10"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -21,7 +23,7 @@ build-backend = "setuptools.build_meta"
 include = ["app*"]
 
 [tool.setuptools.package-data]
-app = ["templates/*.html", "static/*"]
+app = ["templates/*.html", "static/*", "seeds/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

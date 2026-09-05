@@ -5,11 +5,11 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app import db, importer
+from app import db, grocery, importer
 
 BASE_DIR = Path(__file__).parent
 DB_PATH = os.environ.get("DB_PATH", "./recipes.db")
@@ -85,6 +85,13 @@ def index(request: Request, q: str = "", tag: str = "", sort: str = "newest", co
 
 @app.exception_handler(HTTPException)
 async def http_error(request: Request, exc: HTTPException):
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+    # htmx will not swap a non-2xx response, so a full error page would just be
+    # discarded and the user would see nothing happen. Send the bare message
+    # instead; base.html shows it in the flash banner.
+    if request.headers.get("HX-Request"):
+        return PlainTextResponse(exc.detail, status_code=exc.status_code)
     return templates.TemplateResponse(
         request, "error.html",
         {"status": exc.status_code, "detail": exc.detail},
@@ -198,8 +205,42 @@ def import_recipe(request: Request, url: str = Form("")):
     else:
         ctx = _form_ctx(title=found.title, ingredients=found.ingredients,
                         steps=found.steps, tags=", ".join(found.tags),
-                        source_url=found.source_url)
+                        source_url=found.source_url, notes=found.notes)
     return templates.TemplateResponse(request, "form.html", ctx)
+
+
+@app.post("/import/paste", response_class=HTMLResponse)
+def import_pasted(request: Request, recipe: str = Form("")):
+    """Fill the form from a JSON blob — what the `recipe-import` skill emits."""
+    found = importer.parse_pasted(recipe) if recipe.strip() else None
+    if found is None:
+        ctx = _form_ctx(error="That did not parse as recipe JSON. Fill it in below.")
+    else:
+        ctx = _form_ctx(title=found.title, ingredients=found.ingredients,
+                        steps=found.steps, tags=", ".join(found.tags),
+                        source_url=found.source_url, notes=found.notes)
+    return templates.TemplateResponse(request, "form.html", ctx)
+
+
+@app.post("/api/recipes", status_code=201)
+async def create_recipe_api(request: Request, conn=Depends(get_db)):
+    """Create a recipe from a JSON body — what the `recipe-import` skill posts.
+
+    Unlike the form routes this takes application/json, which browsers preflight
+    rather than send blind, so it is not reachable cross-site the way a form
+    post is.
+    """
+    try:
+        doc = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Body must be JSON")
+    found = importer.recipe_from_dict(doc)
+    if found is None:
+        raise HTTPException(status_code=400, detail="Needs at least a non-empty title")
+    rid = db.create_recipe(conn, found.title, ingredients=found.ingredients,
+                           steps=found.steps, notes=found.notes,
+                           source_url=found.source_url or None, tags=found.tags)
+    return {"id": rid, "title": found.title, "url": f"/recipe/{rid}"}
 
 
 def _parse_date(raw: str) -> date:
@@ -224,6 +265,77 @@ def plan_week(request: Request, week: str = "", conn=Depends(get_db)):
             "recipes": db.list_recipes(conn, sort="title"),
         },
     )
+
+
+def _week_items(conn, week: str):
+    start = db.week_start(_parse_date(week) if week else date.today())
+    planned = db.get_plan(conn, start)
+    return start, planned, grocery.build_list(planned, db.get_aisles(conn))
+
+
+@app.get("/grocery", response_class=HTMLResponse)
+def grocery_week(request: Request, week: str = "", conn=Depends(get_db)):
+    start, planned, items = _week_items(conn, week)
+    return templates.TemplateResponse(
+        request, "grocery.html",
+        {
+            "groups": grocery.group_by_aisle(items),
+            "items": items,
+            "dinners": [(d, r) for d, r in planned if r is not None],
+            "start": start,
+            "end": start + timedelta(days=6),
+            "unsorted": sum(1 for i in items if i.aisle == grocery.UNSORTED),
+        },
+    )
+
+
+@app.get("/api/grocery")
+def grocery_api(week: str = "", conn=Depends(get_db)):
+    """The week's list as JSON, for the `grocery-sort` skill.
+
+    `key` is the stable identity to send back to /api/aisles; `aisle` is
+    "unsorted" for anything not yet learned.
+    """
+    start, _planned, items = _week_items(conn, week)
+    return {
+        "week_start": start.isoformat(),
+        "aisles": list(grocery.AISLES),
+        "items": [
+            {"line": i.line, "key": i.key, "aisle": i.aisle, "sources": i.sources}
+            for i in items
+        ],
+        "unsorted_keys": sorted({i.key for i in items if i.aisle == grocery.UNSORTED}),
+    }
+
+
+@app.post("/api/aisles")
+async def set_aisles_api(request: Request, conn=Depends(get_db)):
+    """Learn which aisle ingredients live in: {"ground beef": "meat", ...}.
+
+    Keyed by the `key` field from /api/grocery, so the answer is reused for
+    every future week and the agent only ever works on what is new.
+    """
+    try:
+        doc = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Body must be JSON")
+    if not isinstance(doc, dict) or not doc:
+        raise HTTPException(status_code=400, detail='Body must be a non-empty {"key": "aisle"} object')
+
+    mapping, bad = {}, []
+    for key, aisle in doc.items():
+        name = aisle.strip().lower() if isinstance(aisle, str) else ""
+        if name not in grocery.AISLES:
+            bad.append(f"{key!r}: {aisle!r}")
+        elif key.strip():
+            mapping[key.strip()] = name
+    if bad:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Not valid aisles ({', '.join(sorted(grocery.AISLES))}): {'; '.join(bad)}",
+        )
+
+    return {"learned": db.set_aisles(conn, mapping), "known": len(db.get_aisles(conn))}
 
 
 @app.post("/plan/{day}", response_class=HTMLResponse)

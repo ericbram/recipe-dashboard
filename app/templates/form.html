@@ -8,6 +8,17 @@
   <input name="url" type="url" placeholder="Paste a recipe URL to import" value="{{ source_url }}">
   <button type="submit">Import</button>
 </form>
+
+<details class="paste">
+  <summary>Paste recipe JSON</summary>
+  <form method="post" action="/import/paste">
+    <label class="field">
+      <span>From the <code>recipe-import</code> Claude skill</span>
+      <textarea name="recipe" rows="6" placeholder='{"title": "...", "ingredients": [...], "steps": [...]}'></textarea>
+    </label>
+    <button type="submit">Fill form</button>
+  </form>
+</details>
 {% endif %}
 
 {% if error %}<p class="error">{{ error }}</p>{% endif %}

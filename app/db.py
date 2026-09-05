@@ -26,6 +26,14 @@ CREATE TABLE IF NOT EXISTS plan (
   recipe_id INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE
 );
 
+-- What aisle an ingredient lives in, learned once and reused forever.
+-- Keyed by grocery.sort_key(line), so "1 lb ground beef" and "2 lbs ground
+-- beef" share the one entry. Populated by the grocery-sort agent skill.
+CREATE TABLE IF NOT EXISTS aisles (
+  key   TEXT PRIMARY KEY,
+  aisle TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_recipe_tags_tag ON recipe_tags(tag);
 """
 
@@ -195,3 +203,21 @@ def set_plan(conn: sqlite3.Connection, d: date, recipe_id: int | None) -> None:
             (d.isoformat(), recipe_id),
         )
     conn.commit()
+
+
+def get_aisles(conn: sqlite3.Connection) -> dict[str, str]:
+    """The whole learned key -> aisle map. It stays small: one row per
+    distinct ingredient the household has ever planned."""
+    return {r["key"]: r["aisle"] for r in conn.execute("SELECT key, aisle FROM aisles")}
+
+
+def set_aisles(conn: sqlite3.Connection, mapping: dict[str, str]) -> int:
+    """Upsert learned aisles. Returns the number of rows written."""
+    rows = [(k, v) for k, v in mapping.items() if k and v]
+    conn.executemany(
+        "INSERT INTO aisles (key, aisle) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET aisle = excluded.aisle",
+        rows,
+    )
+    conn.commit()
+    return len(rows)

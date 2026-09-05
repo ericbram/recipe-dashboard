@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Grocery list{% endblock %}
+{% block content %}
+<h1>Grocery list</h1>
+<p class="muted">{{ start.strftime('%B %-d') }} – {{ end.strftime('%B %-d') }}</p>
+
+{% if not items %}
+  <p class="empty">Nothing planned this week yet. <a href="/plan?week={{ start.isoformat() }}">Plan some dinners</a> and the list fills itself in.</p>
+{% else %}
+  <p class="chips">
+    <a class="chip" href="/plan?week={{ start.isoformat() }}">← Back to the week</a>
+    <button type="button" class="chip" id="clear-checks">Uncheck all</button>
+  </p>
+
+  <p class="muted">{{ items | length }} items for {{ dinners | length }} dinner{{ '' if dinners | length == 1 else 's' }}:
+    {{ dinners | map(attribute=1) | map(attribute='title') | unique | join(', ') }}</p>
+
+  {% if unsorted %}
+    <p class="muted">{{ unsorted }} not yet in an aisle — ask Claude to <code>sort my grocery list</code>.</p>
+  {% endif %}
+
+  <div class="grocery" data-week="{{ start.isoformat() }}">
+    {% for aisle, group in groups %}
+      <h2 class="aisle">{{ aisle }}</h2>
+      <ul>
+        {% for item in group %}
+          <li>
+            <label>
+              <input type="checkbox" value="{{ item.line }}">
+              <span class="what">{{ item.line }}</span>
+              <span class="who {{ 'shared' if item.shared }}">{{ item.summary }}</span>
+            </label>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endfor %}
+  </div>
+{% endif %}
+
+<script>
+  // Checked-off items survive a reload, so the list works while you walk the
+  // store. Per-browser and per-week; nothing leaves the device.
+  (function () {
+    var list = document.querySelector('.grocery');
+    if (!list) return;
+    var key = 'grocery:' + list.dataset.week;
+    var done = {};
+    try { done = JSON.parse(localStorage.getItem(key)) || {}; } catch (e) {}
+
+    list.querySelectorAll('input[type=checkbox]').forEach(function (box) {
+      box.checked = !!done[box.value];
+      box.closest('li').classList.toggle('done', box.checked);
+      box.addEventListener('change', function () {
+        box.closest('li').classList.toggle('done', box.checked);
+        if (box.checked) { done[box.value] = 1; } else { delete done[box.value]; }
+        try { localStorage.setItem(key, JSON.stringify(done)); } catch (e) {}
+      });
+    });
+
+    document.getElementById('clear-checks').addEventListener('click', function () {
+      done = {};
+      try { localStorage.removeItem(key); } catch (e) {}
+      list.querySelectorAll('input[type=checkbox]').forEach(function (box) {
+        box.checked = false;
+        box.closest('li').classList.remove('done');
+      });
+    });
+  })();
+</script>
+{% endblock %}

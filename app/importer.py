@@ -5,7 +5,9 @@ results, so this needs no site-specific code. If a site you care about turns
 out not to emit it, the `recipe-scrapers` library is the upgrade path.
 """
 
+import ipaddress
 import json
+import socket
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 
@@ -22,6 +24,7 @@ class ImportedRecipe:
     steps: str = ""
     tags: list[str] = field(default_factory=list)
     source_url: str = ""
+    notes: str = ""
 
 
 class _JsonLdCollector(HTMLParser):
@@ -129,16 +132,79 @@ def parse_recipe(html: str, source_url: str = "") -> ImportedRecipe | None:
     return None
 
 
+def recipe_from_dict(doc) -> ImportedRecipe | None:
+    """Build a recipe from a decoded JSON object, or None if it is not one.
+
+    Every field runs through the same normalizers the JSON-LD path uses, so a
+    list and a newline-delimited string are accepted interchangeably.
+    """
+    if not isinstance(doc, dict):
+        return None
+    title = _extract_title(doc.get("title"))
+    if not title:
+        return None
+    url = doc.get("source_url")
+    return ImportedRecipe(
+        title=title,
+        ingredients=_lines(doc.get("ingredients")),
+        steps=_lines(doc.get("steps")),
+        tags=_tags(doc.get("tags")),
+        source_url=url.strip() if isinstance(url, str) else "",
+        notes=_lines(doc.get("notes")),
+    )
+
+
+def parse_pasted(text: str) -> ImportedRecipe | None:
+    """Parse the JSON blob the `recipe-import` Claude skill produces."""
+    blob = text.strip()
+    if blob.startswith("```"):
+        # Tolerate a markdown code fence copied along with the JSON.
+        blob = blob.split("\n", 1)[-1].rsplit("```", 1)[0]
+    try:
+        return recipe_from_dict(json.loads(blob))
+    except ValueError:
+        return None
+
+
+def _is_public(host: str | None) -> bool:
+    """True only if every address `host` resolves to is a public one."""
+    if not host:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return False
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global:
+            return False
+    return bool(infos)
+
+
+def _block_private(request: httpx.Request) -> None:
+    """Refuse to fetch anything that is not a public http(s) address.
+
+    Runs on every request the client makes, redirects included, so a public
+    URL cannot bounce us onto the LAN.
+    """
+    if request.url.scheme not in ("http", "https") or not _is_public(request.url.host):
+        raise ValueError(f"refusing to fetch non-public address: {request.url}")
+
+
 def fetch_recipe(url: str) -> ImportedRecipe | None:
     """Fetch and parse. Returns None on any failure — import never blocks entry."""
+    # ponytail: resolve-then-connect, so a DNS rebind between the two could
+    # still land on a private address. Closing that means a custom transport
+    # that dials the address it checked; not worth it for a household app.
     try:
-        resp = httpx.get(
-            url,
+        with httpx.Client(
             timeout=TIMEOUT,
             follow_redirects=True,
             headers={"User-Agent": USER_AGENT},
-        )
-        resp.raise_for_status()
-        return parse_recipe(resp.text, url)
+            event_hooks={"request": [_block_private]},
+        ) as client:
+            resp = client.get(url)
+            resp.raise_for_status()
+            return parse_recipe(resp.text, url)
     except Exception:
         return None

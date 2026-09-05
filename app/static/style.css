@@ -29,6 +29,29 @@ textarea { width:100%; min-height:8rem; }
 .day .name { width:6.5rem; color:var(--muted); }
 .day.today { border-color:var(--accent); }
 .error { color:#a11; }
+#flash { margin:1rem 1rem 0; padding:.6rem .9rem; border:1px solid #a11; border-radius:8px; }
+.paste { margin-bottom:1rem; }
+.paste summary { cursor:pointer; color:var(--muted); }
+.paste form { margin-top:.75rem; }
+.paste textarea { font-family:ui-monospace, monospace; font-size:.85rem; }
+.muted { color:var(--muted); }
+.grocery { margin:1rem 0; }
+.grocery ul { list-style:none; padding:0; margin:0 0 1.25rem; }
+.grocery li { border-bottom:1px solid var(--line); }
+.aisle { font-size:.8rem; text-transform:uppercase; letter-spacing:.08em;
+  color:var(--accent); margin:0 0 .25rem; padding-top:.5rem; }
+.grocery label { display:flex; align-items:baseline; gap:.6rem; padding:.6rem .25rem; cursor:pointer; }
+.grocery input { flex:none; width:1.1rem; height:1.1rem; }
+.grocery .what { flex:1; }
+.grocery .who { font-size:.8rem; color:var(--muted); text-align:right; }
+.grocery .who.shared { color:var(--accent); font-weight:600; }
+.grocery li.done .what { text-decoration:line-through; color:var(--muted); }
+button.chip { font:inherit; cursor:pointer; }
+@media print {
+  nav, .chips, .paste { display:none; }
+  .grocery label { padding:.3rem .25rem; }
+}
+[hidden] { display:none; }
 .field { display:block; margin-bottom:1rem; }
 .field span { display:block; font-size:.85rem; color:var(--muted); margin-bottom:.25rem; }
 .field input, .field textarea { width:100%; }
