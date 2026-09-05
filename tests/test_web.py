@@ -562,3 +562,56 @@ def test_grocery_says_you_have_everything_rather_than_nothing_is_planned(client)
     body = client.get("/grocery?week=2026-09-01").text
     assert "Nothing to buy" in body
     assert "Nothing planned this week yet" not in body
+
+
+def test_recipe_list_offers_a_this_week_button(client):
+    rid = db.create_recipe(client.conn, "Chili")
+    body = client.get("/").text
+    assert "+ This week" in body
+    assert f'value="{rid}"' in body
+
+
+def test_toggling_from_the_list_adds_to_the_current_week(client):
+    rid = db.create_recipe(client.conn, "Chili")
+    resp = client.post("/plan/toggle", data={"recipe_id": str(rid), "on": "1"},
+                       headers={"HX-Request": "true"})
+    assert resp.status_code == 200
+    assert "✓ This week" in resp.text
+    assert [r["title"] for r in db.get_plan(client.conn, date.today())] == ["Chili"]
+
+
+def test_toggling_again_removes_it(client):
+    rid = db.create_recipe(client.conn, "Chili")
+    client.post("/plan/toggle", data={"recipe_id": str(rid), "on": "1"})
+    resp = client.post("/plan/toggle", data={"recipe_id": str(rid), "on": "0"},
+                       headers={"HX-Request": "true"})
+    assert "+ This week" in resp.text
+    assert db.get_plan(client.conn, date.today()) == []
+
+
+def test_the_button_reflects_what_is_already_on_the_week(client):
+    rid = db.create_recipe(client.conn, "Chili")
+    db.add_to_plan(client.conn, date.today(), rid)
+    assert "✓ This week" in client.get("/").text
+    assert "✓ This week" in client.get(f"/recipe/{rid}").text
+
+
+def test_toggle_rejects_a_bad_id(client):
+    assert client.post("/plan/toggle", data={"recipe_id": "abc"}).status_code == 400
+    assert client.post("/plan/toggle", data={"recipe_id": "9999"}).status_code == 404
+
+
+def test_adding_a_staple_leaves_the_panel_open(client):
+    """The whole #kitchen div is swapped, so the panel must be told to reopen."""
+    _stock_the_week(client)
+    resp = client.post("/staples/add", data={"week": "2026-09-01", "line": "Coffee"},
+                       headers={"HX-Request": "true"})
+    assert '<details class="staples" open>' in resp.text
+
+
+def test_ticking_an_item_does_not_force_the_panel_open(client):
+    _stock_the_week(client)
+    resp = client.post("/kitchen/have", data={
+        "week": "2026-09-01", "item_key": "1 lb ground beef", "have": "1"},
+        headers={"HX-Request": "true"})
+    assert '<details class="staples" open>' not in resp.text

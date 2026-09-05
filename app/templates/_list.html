@@ -7,6 +7,7 @@
         <a href="/recipe/{{ r['id'] }}">{{ r['title'] }}</a>
         <span class="stars" aria-label="{{ star_label(r['rating']) }}">{{ stars(r['rating']) }}</span>
         {% if r['tags'] %}<span class="tags">{{ r['tags'] }}</span>{% endif %}
+        {% with rid = r['id'], on_week = r['id'] in on_week %}{% include "_weekbtn.html" %}{% endwith %}
       </li>
     {% endfor %}
   </ul>

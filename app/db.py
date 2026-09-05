@@ -75,20 +75,35 @@ def _migrate_plan_to_weeks(conn: sqlite3.Connection) -> None:
     """The plan used to be one recipe per day, keyed by date. It is now a set
     of recipes per week. Fold each old row onto its week's Monday.
 
-    Idempotent: does nothing once the table has a `week` column, so it is safe
-    to leave in the startup path.
+    Resumable rather than transactional. `executescript` issues an implicit
+    COMMIT, so the rename below lands before the copy does and the two cannot
+    share a transaction. Instead, a surviving `plan_by_day` is the signal that
+    a previous run was interrupted: the copy re-runs (INSERT OR IGNORE makes
+    it safe to repeat) and only then is the old table dropped. Crashing at any
+    point leaves the rows recoverable on the next start.
     """
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(plan)")}
-    if not cols or "week" in cols:
+    def table_names() -> set[str]:
+        return {r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+
+    present = table_names()
+    if "plan" in present and "plan_by_day" not in present:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(plan)")}
+        if "week" not in cols:
+            conn.execute("ALTER TABLE plan RENAME TO plan_by_day")
+            present = table_names()
+
+    if "plan_by_day" not in present:
         return
-    old = conn.execute("SELECT date, recipe_id FROM plan").fetchall()
-    conn.execute("ALTER TABLE plan RENAME TO plan_by_day")
-    conn.executescript(SCHEMA)
+
+    conn.executescript(SCHEMA)  # the new plan table, if it is not there yet
+    old = conn.execute("SELECT date, recipe_id FROM plan_by_day").fetchall()
     # Two days holding the same recipe collapse to one entry for the week.
     conn.executemany(
         "INSERT OR IGNORE INTO plan (week, recipe_id) VALUES (?, ?)",
         [(week_start(date.fromisoformat(r["date"])).isoformat(), r["recipe_id"]) for r in old],
     )
+    conn.commit()
     conn.execute("DROP TABLE plan_by_day")
     conn.commit()
 

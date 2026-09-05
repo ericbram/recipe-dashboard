@@ -161,3 +161,15 @@ def test_a_have_mark_follows_the_line_not_the_recipe():
     assert len(items) == 1
     assert items[0].have is True
     assert grocery.to_buy(items) == []
+
+
+def test_accents_fold_so_an_aisle_is_learned_once():
+    assert grocery.sort_key("2 jalapeños, sliced") == "jalapenos sliced"
+    assert grocery.sort_key("1 cup crème fraîche") == grocery.sort_key("1 cup creme fraiche")
+    assert grocery.sort_key("2 jalapeños") == grocery.sort_key("2 jalapenos")
+
+
+def test_folding_does_not_swallow_the_whole_line():
+    """A line that is only non-ASCII must still get a usable key."""
+    assert grocery.sort_key("½ cup sugar") == "sugar"
+    assert grocery.sort_key("米") == "米"     # falls back to the line itself

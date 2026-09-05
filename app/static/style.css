@@ -33,6 +33,10 @@ textarea { width:100%; min-height:8rem; }
   font-size:1rem; padding:.15rem .4rem; border-radius:4px; }
 .picked .remove:hover { color:#a11; background:rgba(170,17,17,.08); }
 .error { color:#a11; }
+.weekbtn { margin:0; }
+.weekbtn button { font:inherit; cursor:pointer; white-space:nowrap; }
+.card .weekbtn, .card .stars { margin-left:0; }
+.card .stars { margin-left:auto; }
 .kitchen { margin:1rem 0; }
 .kitchen ul { list-style:none; padding:0; margin:0 0 1.25rem; }
 .kitchen li { display:flex; align-items:center; gap:.75rem; padding:.5rem .25rem;

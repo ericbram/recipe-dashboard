@@ -4,6 +4,7 @@
 <h1>{{ r['title'] }}</h1>
 {% include "_stars.html" %}
 {% if tags %}<p class="tags">{{ tags | join(', ') }}</p>{% endif %}
+<p class="chips">{% with rid = r['id'], on_week = r['id'] in on_week %}{% include "_weekbtn.html" %}{% endwith %}</p>
 {% if r['source_url'] and (r['source_url'].startswith('http://') or r['source_url'].startswith('https://')) %}<p><a href="{{ r['source_url'] }}" rel="noreferrer">Original recipe</a></p>{% endif %}
 
 <h2>Ingredients</h2>

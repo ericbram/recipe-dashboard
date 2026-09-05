@@ -1,0 +1,9 @@
+<form method="post" action="/plan/toggle" class="weekbtn"
+      hx-post="/plan/toggle" hx-target="this" hx-swap="outerHTML">
+  <input type="hidden" name="recipe_id" value="{{ rid }}">
+  <input type="hidden" name="on" value="{{ '0' if on_week else '1' }}">
+  <button type="submit" class="chip {{ 'on' if on_week }}"
+          aria-pressed="{{ 'true' if on_week else 'false' }}">
+    {{ '✓ This week' if on_week else '+ This week' }}
+  </button>
+</form>

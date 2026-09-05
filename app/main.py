@@ -77,6 +77,7 @@ def index(request: Request, q: str = "", tag: str = "", sort: str = "newest", co
         "q": q,
         "tag": tag,
         "sort": sort,
+        "on_week": _this_week_ids(conn),
     }
     # Full page normally; the bare list fragment when HTMX asks for it.
     name = "_list.html" if request.headers.get("HX-Request") else "index.html"
@@ -144,7 +145,8 @@ def recipe_detail(request: Request, recipe_id: int, conn=Depends(get_db)):
         raise HTTPException(status_code=404, detail="Recipe not found")
     return templates.TemplateResponse(
         request, "recipe.html",
-        {"r": row, "tags": db.get_tags(conn, recipe_id)},
+        {"r": row, "tags": db.get_tags(conn, recipe_id),
+         "on_week": _this_week_ids(conn)},
     )
 
 
@@ -250,6 +252,11 @@ def _parse_date(raw: str) -> date:
         raise HTTPException(status_code=400, detail=f"Not a date: {raw!r}")
 
 
+def _this_week_ids(conn) -> set[int]:
+    """Recipe ids on the current week — for the browse pages' toggle button."""
+    return {r["id"] for r in db.get_plan(conn, date.today())}
+
+
 def _plan_ctx(conn, start: date) -> dict:
     chosen = db.get_plan(conn, start)
     picked = {r["id"] for r in chosen}
@@ -269,38 +276,39 @@ def plan_week(request: Request, week: str = "", conn=Depends(get_db)):
     return templates.TemplateResponse(request, "plan.html", _plan_ctx(conn, start))
 
 
-def _week_items(conn, week: str):
+def _week_items(conn, week: str, staples=None):
     """The whole proposed list for a week: recipe ingredients + staples, with
-    each item flagged by what the kitchen check said."""
+    each item flagged by what the kitchen check said.
+
+    `staples` is injectable only so a caller that already fetched them (the
+    kitchen page renders the list too) does not query twice.
+    """
     start = db.week_start(_parse_date(week) if week else date.today())
     planned = db.get_plan(conn, start)
     items = grocery.build_list(
         planned,
         known_aisles=db.get_aisles(conn),
-        staples=db.get_staples(conn),
+        staples=db.get_staples(conn) if staples is None else staples,
         have=db.get_pantry(conn, start),
     )
     return start, planned, items
 
 
-def _kitchen_ctx(conn, start: date) -> dict:
-    planned = db.get_plan(conn, start)
-    items = grocery.build_list(
-        planned,
-        known_aisles=db.get_aisles(conn),
-        staples=db.get_staples(conn),
-        have=db.get_pantry(conn, start),
-    )
+def _kitchen_ctx(conn, start: date, staples_open: bool = False) -> dict:
+    staples = db.get_staples(conn)
+    _, planned, items = _week_items(conn, start.isoformat(), staples=staples)
     return {
         "groups": grocery.group_by_aisle(items),
         "items": items,
         "recipes": planned,
-        "staples": db.get_staples(conn),
+        "staples": staples,
         "start": start,
         "prev": start - timedelta(days=7),
         "next": start + timedelta(days=7),
         "have_count": sum(1 for i in items if i.have),
         "buy_count": len(grocery.to_buy(items)),
+        # Keep the panel open across a swap when the swap came from using it.
+        "staples_open": staples_open,
     }
 
 
@@ -334,7 +342,8 @@ def staple_add(request: Request, week: str = Form(""), line: str = Form(""),
         raise HTTPException(status_code=400, detail=str(exc))
     if not request.headers.get("HX-Request"):
         return RedirectResponse(f"/kitchen?week={start.isoformat()}", status_code=303)
-    return templates.TemplateResponse(request, "_kitchen.html", _kitchen_ctx(conn, start))
+    return templates.TemplateResponse(
+        request, "_kitchen.html", _kitchen_ctx(conn, start, staples_open=True))
 
 
 @app.post("/staples/remove", response_class=HTMLResponse)
@@ -347,7 +356,8 @@ def staple_remove(request: Request, week: str = Form(""), staple_id: str = Form(
         raise HTTPException(status_code=400, detail=f"Not a staple id: {staple_id!r}")
     if not request.headers.get("HX-Request"):
         return RedirectResponse(f"/kitchen?week={start.isoformat()}", status_code=303)
-    return templates.TemplateResponse(request, "_kitchen.html", _kitchen_ctx(conn, start))
+    return templates.TemplateResponse(
+        request, "_kitchen.html", _kitchen_ctx(conn, start, staples_open=True))
 
 
 @app.get("/grocery", response_class=HTMLResponse)
@@ -449,3 +459,26 @@ def plan_add(request: Request, week: str = Form(""), recipe_id: str = Form(""),
 def plan_remove(request: Request, week: str = Form(""), recipe_id: str = Form(""),
                 conn=Depends(get_db)):
     return _plan_change(request, conn, week, recipe_id, remove=True)
+
+
+@app.post("/plan/toggle", response_class=HTMLResponse)
+def plan_toggle(request: Request, recipe_id: str = Form(""), on: str = Form("1"),
+                conn=Depends(get_db)):
+    """Add or drop a recipe from the current week, from wherever you are
+    browsing. Always the current week — a button on the recipe list has no
+    other week in view, and picking one is what /plan is for."""
+    try:
+        rid = int(recipe_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Not a recipe id: {recipe_id!r}")
+    if db.get_recipe(conn, rid) is None:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    want_on = on.lower() in ("1", "true", "on", "yes")
+    today = date.today()
+    (db.add_to_plan if want_on else db.remove_from_plan)(conn, today, rid)
+
+    if not request.headers.get("HX-Request"):
+        return RedirectResponse(f"/recipe/{rid}", status_code=303)
+    return templates.TemplateResponse(
+        request, "_weekbtn.html", {"rid": rid, "on_week": want_on})

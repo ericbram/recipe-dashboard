@@ -9,6 +9,7 @@ wrong is worse at the store than one that shows you both lines.
 """
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
 # Leading amounts and their units say nothing about *what* the ingredient is,
@@ -78,12 +79,17 @@ class Item:
 def sort_key(line: str) -> str:
     """A rough 'what is this ingredient' key, for putting like next to like.
 
+    Accents are folded first, so "jalapeños" and "jalapenos" reach the same
+    key instead of being learned as two different aisles.
+
     ponytail: word-prefix stripping, not real parsing. It gets quantities and
     units off the front, which is most of the value; it will not group
     "red onion" with "onion". Swap in an ingredient parser if that stops being
     good enough.
     """
-    words = re.sub(r"[^a-z\s]", " ", line.lower()).split()
+    flat = unicodedata.normalize("NFKD", line.lower())
+    flat = "".join(c for c in flat if not unicodedata.combining(c))
+    words = re.sub(r"[^a-z\s]", " ", flat).split()
     while words and (words[0] in _UNITS or words[0] in _NOISE):
         words.pop(0)
     return " ".join(words) or line.lower().strip()

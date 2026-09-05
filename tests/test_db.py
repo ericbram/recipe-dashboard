@@ -329,3 +329,39 @@ def test_marking_twice_is_a_no_op(conn):
     for _ in range(2):
         db.set_pantry(conn, date(2026, 9, 2), "1 lb beef", have=True)
     assert db.get_pantry(conn, date(2026, 8, 31)) == {"1 lb beef"}
+
+
+def _interrupted_migration(tmp_path):
+    """A database left mid-migration: renamed, new table made, copy never ran."""
+    c = db.connect(str(tmp_path / "crash.db"))
+    c.executescript(OLD_PLAN_SCHEMA)
+    c.execute("INSERT INTO recipes (id,title,created_at) VALUES (1,'Chili','2026-09-01')")
+    c.execute("INSERT INTO recipes (id,title,created_at) VALUES (2,'Stew','2026-09-01')")
+    c.execute("INSERT INTO plan (date,recipe_id) VALUES ('2026-09-02',1)")
+    c.execute("INSERT INTO plan (date,recipe_id) VALUES ('2026-09-04',2)")
+    c.commit()
+    c.execute("ALTER TABLE plan RENAME TO plan_by_day")
+    c.executescript(db.SCHEMA)   # implicit COMMIT — the rename is now durable
+    return c
+
+
+def test_an_interrupted_migration_is_finished_on_the_next_start(tmp_path):
+    """executescript commits, so the rename and the copy cannot share a
+    transaction. A surviving plan_by_day must mean 'resume', not 'done'."""
+    c = _interrupted_migration(tmp_path)
+    assert db.get_plan(c, date(2026, 8, 31)) == [], "precondition: the copy never ran"
+
+    db.init_schema(c)   # restart
+
+    assert [r["title"] for r in db.get_plan(c, date(2026, 8, 31))] == ["Chili", "Stew"]
+    left = {r["name"] for r in c.execute("SELECT name FROM sqlite_master WHERE name='plan_by_day'")}
+    assert left == set(), "the old table must be dropped once the rows are safe"
+    c.close()
+
+
+def test_resuming_twice_does_not_duplicate(tmp_path):
+    c = _interrupted_migration(tmp_path)
+    db.init_schema(c)
+    db.init_schema(c)
+    assert len(db.get_plan(c, date(2026, 8, 31))) == 2
+    c.close()

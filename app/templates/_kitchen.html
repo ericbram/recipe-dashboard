@@ -34,7 +34,7 @@
     </div>
   {% endif %}
 
-  <details class="staples" {% if not items %}open{% endif %}>
+  <details class="staples" {% if staples_open or not items %}open{% endif %}>
     <summary>Staples — always on this list ({{ staples | length }})</summary>
     <form method="post" action="/staples/add" class="filters"
           hx-post="/staples/add" hx-target="#kitchen" hx-swap="outerHTML">
