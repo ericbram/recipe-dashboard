@@ -1,0 +1,34 @@
+<div id="plan" class="plan">
+  <form method="post" action="/plan/add" class="filters"
+        hx-post="/plan/add" hx-target="#plan" hx-swap="outerHTML">
+    <input type="hidden" name="week" value="{{ start.isoformat() }}">
+    <select name="recipe_id" aria-label="Add a recipe to this week" required>
+      <option value="">— pick a recipe —</option>
+      {% for r in recipes %}
+        <option value="{{ r['id'] }}">{{ r['title'] }}{% if r['tags'] %} · {{ r['tags'] }}{% endif %}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">Add</button>
+  </form>
+
+  {% if not chosen %}
+    <p class="empty">Nothing picked for this week yet. Add a few recipes and they'll show up here.</p>
+  {% else %}
+    <ul class="picked">
+      {% for r in chosen %}
+        <li>
+          <a href="/recipe/{{ r['id'] }}" class="what">{{ r['title'] }}</a>
+          <span class="stars" aria-label="{{ star_label(r['rating']) }}">{{ stars(r['rating']) }}</span>
+          <form method="post" action="/plan/remove"
+                hx-post="/plan/remove" hx-target="#plan" hx-swap="outerHTML">
+            <input type="hidden" name="week" value="{{ start.isoformat() }}">
+            <input type="hidden" name="recipe_id" value="{{ r['id'] }}">
+            <button type="submit" class="remove" aria-label="Remove {{ r['title'] }} from this week">✕</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+    <p class="muted">{{ chosen | length }} recipe{{ '' if chosen | length == 1 else 's' }} ·
+      <a href="/grocery?week={{ start.isoformat() }}">Grocery list</a></p>
+  {% endif %}
+</div>

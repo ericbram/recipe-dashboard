@@ -9,7 +9,6 @@ wrong is worse at the store than one that shows you both lines.
 """
 
 import re
-from collections import Counter
 from dataclasses import dataclass, field
 
 # Leading amounts and their units say nothing about *what* the ingredient is,
@@ -36,8 +35,8 @@ UNSORTED = "unsorted"
 @dataclass
 class Item:
     line: str
-    #: One entry per planned dinner that needs this line, so a recipe cooked
-    #: twice in a week counts twice — you have to buy for both.
+    #: Titles of the shortlisted recipes that need this line. A recipe appears
+    #: at most once in a week's shortlist, so these are always distinct.
     sources: list[str] = field(default_factory=list)
     #: sort_key(line) — the identity the learned aisle map is keyed by.
     key: str = ""
@@ -45,8 +44,7 @@ class Item:
 
     @property
     def summary(self) -> str:
-        counts = Counter(self.sources)
-        return ", ".join(t if n == 1 else f"{t} ×{n}" for t, n in counts.items())
+        return ", ".join(self.sources)
 
     @property
     def shared(self) -> bool:
@@ -69,14 +67,14 @@ def sort_key(line: str) -> str:
 
 
 def build_list(planned, known_aisles: dict[str, str] | None = None) -> list[Item]:
-    """planned is db.get_plan()'s [(date, recipe_row_or_None), ...].
+    """planned is db.get_plan()'s list of recipe rows.
 
     known_aisles is db.get_aisles() — anything not in it stays UNSORTED until
     the grocery-sort skill fills it in.
     """
     known_aisles = known_aisles or {}
     items: dict[str, Item] = {}
-    for _day, recipe in planned:
+    for recipe in planned:
         if recipe is None:
             continue
         seen_today: set[str] = set()

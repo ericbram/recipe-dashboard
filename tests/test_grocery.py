@@ -1,5 +1,3 @@
-from datetime import date, timedelta
-
 from app import grocery
 
 
@@ -7,9 +5,9 @@ class FakeRecipe(dict):
     """db.get_plan returns sqlite3.Row; a dict indexes the same way."""
 
 
-def plan(*pairs):
-    monday = date(2026, 8, 31)
-    return [(monday + timedelta(days=i), r) for i, r in enumerate(pairs)]
+def plan(*recipes):
+    """db.get_plan() now returns plain recipe rows — no days, no gaps."""
+    return [r for r in recipes if r is not None]
 
 
 def recipe(title, ingredients):
@@ -24,8 +22,8 @@ def test_collects_every_ingredient_from_the_planned_dinners():
     assert [i.line for i in items] == ["1 lb ground beef", "1 onion, diced", "1 lb spaghetti"]
 
 
-def test_unplanned_days_are_skipped():
-    assert grocery.build_list(plan(None, None)) == []
+def test_a_week_with_nothing_picked_is_empty():
+    assert grocery.build_list(plan()) == []
 
 
 def test_identical_lines_collapse_and_name_both_recipes():
@@ -37,16 +35,6 @@ def test_identical_lines_collapse_and_name_both_recipes():
     assert items[0].sources == ["Chili", "Soup"]
     assert items[0].shared is True
     assert items[0].summary == "Chili, Soup"
-
-
-def test_a_recipe_cooked_twice_in_a_week_counts_twice():
-    """You have to shop for both nights, so this must not collapse to one."""
-    items = grocery.build_list(plan(
-        recipe("Chili", "1 lb ground beef"),
-        recipe("Chili", "1 lb ground beef"),
-    ))
-    assert items[0].sources == ["Chili", "Chili"]
-    assert items[0].summary == "Chili ×2"
 
 
 def test_one_recipe_listing_a_thing_twice_still_buys_it_once():

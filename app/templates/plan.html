@@ -8,9 +8,5 @@
   <a class="chip" href="/plan?week={{ next.isoformat() }}">Next →</a>
   <a class="chip" href="/grocery?week={{ start.isoformat() }}">Grocery list</a>
 </p>
-<div class="week">
-  {% for day, recipe in week %}
-    {% include "_day.html" %}
-  {% endfor %}
-</div>
+{% include "_plan.html" %}
 {% endblock %}

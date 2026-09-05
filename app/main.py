@@ -250,21 +250,23 @@ def _parse_date(raw: str) -> date:
         raise HTTPException(status_code=400, detail=f"Not a date: {raw!r}")
 
 
+def _plan_ctx(conn, start: date) -> dict:
+    chosen = db.get_plan(conn, start)
+    picked = {r["id"] for r in chosen}
+    return {
+        "chosen": chosen,
+        "start": start,
+        "prev": start - timedelta(days=7),
+        "next": start + timedelta(days=7),
+        # Only offer recipes not already on the list, so adding twice is impossible.
+        "recipes": [r for r in db.list_recipes(conn, sort="title") if r["id"] not in picked],
+    }
+
+
 @app.get("/plan", response_class=HTMLResponse)
 def plan_week(request: Request, week: str = "", conn=Depends(get_db)):
-    anchor = _parse_date(week) if week else date.today()
-    start = db.week_start(anchor)
-    return templates.TemplateResponse(
-        request, "plan.html",
-        {
-            "week": db.get_plan(conn, start),
-            "start": start,
-            "prev": start - timedelta(days=7),
-            "next": start + timedelta(days=7),
-            "today": date.today(),
-            "recipes": db.list_recipes(conn, sort="title"),
-        },
-    )
+    start = db.week_start(_parse_date(week) if week else date.today())
+    return templates.TemplateResponse(request, "plan.html", _plan_ctx(conn, start))
 
 
 def _week_items(conn, week: str):
@@ -281,7 +283,7 @@ def grocery_week(request: Request, week: str = "", conn=Depends(get_db)):
         {
             "groups": grocery.group_by_aisle(items),
             "items": items,
-            "dinners": [(d, r) for d, r in planned if r is not None],
+            "dinners": planned,
             "start": start,
             "end": start + timedelta(days=6),
             "unsorted": sum(1 for i in items if i.aisle == grocery.UNSORTED),
@@ -338,24 +340,31 @@ async def set_aisles_api(request: Request, conn=Depends(get_db)):
     return {"learned": db.set_aisles(conn, mapping), "known": len(db.get_aisles(conn))}
 
 
-@app.post("/plan/{day}", response_class=HTMLResponse)
-def assign_day(request: Request, day: str, recipe_id: str = Form(""), conn=Depends(get_db)):
-    d = _parse_date(day)
-    if recipe_id.strip():
-        try:
-            rid = int(recipe_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Not a recipe id: {recipe_id!r}")
-    else:
-        rid = None
-    if rid is not None and db.get_recipe(conn, rid) is None:
+def _plan_change(request: Request, conn, week: str, recipe_id: str, remove: bool):
+    """Shared by add and remove — both validate the same way and answer the
+    same two ways (fragment for htmx, redirect for a plain form post)."""
+    start = db.week_start(_parse_date(week) if week else date.today())
+    try:
+        rid = int(recipe_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Not a recipe id: {recipe_id!r}")
+    if db.get_recipe(conn, rid) is None:
         raise HTTPException(status_code=404, detail="Recipe not found")
-    db.set_plan(conn, d, rid)
+
+    (db.remove_from_plan if remove else db.add_to_plan)(conn, start, rid)
+
     if not request.headers.get("HX-Request"):
-        return RedirectResponse(f"/plan?week={d.isoformat()}", status_code=303)
-    planned = dict(db.get_plan(conn, db.week_start(d)))[d]
-    return templates.TemplateResponse(
-        request, "_day.html",
-        {"day": d, "recipe": planned, "today": date.today(),
-         "recipes": db.list_recipes(conn, sort="title")},
-    )
+        return RedirectResponse(f"/plan?week={start.isoformat()}", status_code=303)
+    return templates.TemplateResponse(request, "_plan.html", _plan_ctx(conn, start))
+
+
+@app.post("/plan/add", response_class=HTMLResponse)
+def plan_add(request: Request, week: str = Form(""), recipe_id: str = Form(""),
+             conn=Depends(get_db)):
+    return _plan_change(request, conn, week, recipe_id, remove=False)
+
+
+@app.post("/plan/remove", response_class=HTMLResponse)
+def plan_remove(request: Request, week: str = Form(""), recipe_id: str = Form(""),
+                conn=Depends(get_db)):
+    return _plan_change(request, conn, week, recipe_id, remove=True)

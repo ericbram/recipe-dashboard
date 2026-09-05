@@ -21,9 +21,12 @@ CREATE TABLE IF NOT EXISTS recipe_tags (
   PRIMARY KEY (recipe_id, tag)
 );
 
+-- A week's shortlist: which recipes we intend to cook, with no day attached.
+-- `week` is the ISO date of that week's Monday.
 CREATE TABLE IF NOT EXISTS plan (
-  date      TEXT PRIMARY KEY,
-  recipe_id INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE
+  week      TEXT NOT NULL,
+  recipe_id INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+  PRIMARY KEY (week, recipe_id)
 );
 
 -- What aisle an ingredient lives in, learned once and reused forever.
@@ -47,7 +50,30 @@ def connect(db_path: str) -> sqlite3.Connection:
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
+    _migrate_plan_to_weeks(conn)
     conn.executescript(SCHEMA)
+    conn.commit()
+
+
+def _migrate_plan_to_weeks(conn: sqlite3.Connection) -> None:
+    """The plan used to be one recipe per day, keyed by date. It is now a set
+    of recipes per week. Fold each old row onto its week's Monday.
+
+    Idempotent: does nothing once the table has a `week` column, so it is safe
+    to leave in the startup path.
+    """
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(plan)")}
+    if not cols or "week" in cols:
+        return
+    old = conn.execute("SELECT date, recipe_id FROM plan").fetchall()
+    conn.execute("ALTER TABLE plan RENAME TO plan_by_day")
+    conn.executescript(SCHEMA)
+    # Two days holding the same recipe collapse to one entry for the week.
+    conn.executemany(
+        "INSERT OR IGNORE INTO plan (week, recipe_id) VALUES (?, ?)",
+        [(week_start(date.fromisoformat(r["date"])).isoformat(), r["recipe_id"]) for r in old],
+    )
+    conn.execute("DROP TABLE plan_by_day")
     conn.commit()
 
 
@@ -181,27 +207,29 @@ def week_start(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
-def get_plan(conn: sqlite3.Connection, start: date) -> list[tuple[date, sqlite3.Row | None]]:
-    days = [start + timedelta(days=i) for i in range(7)]
-    rows = conn.execute(
-        """SELECT p.date AS day, r.*
-             FROM plan p JOIN recipes r ON r.id = p.recipe_id
-            WHERE p.date BETWEEN ? AND ?""",
-        (days[0].isoformat(), days[-1].isoformat()),
+def get_plan(conn: sqlite3.Connection, week: date) -> list[sqlite3.Row]:
+    """The recipes shortlisted for that week, alphabetical."""
+    return conn.execute(
+        """SELECT r.* FROM plan p JOIN recipes r ON r.id = p.recipe_id
+            WHERE p.week = ?
+            ORDER BY r.title COLLATE NOCASE""",
+        (week_start(week).isoformat(),),
     ).fetchall()
-    by_day = {date.fromisoformat(r["day"]): r for r in rows}
-    return [(d, by_day.get(d)) for d in days]
 
 
-def set_plan(conn: sqlite3.Connection, d: date, recipe_id: int | None) -> None:
-    if recipe_id is None:
-        conn.execute("DELETE FROM plan WHERE date = ?", (d.isoformat(),))
-    else:
-        conn.execute(
-            "INSERT INTO plan (date, recipe_id) VALUES (?, ?) "
-            "ON CONFLICT(date) DO UPDATE SET recipe_id = excluded.recipe_id",
-            (d.isoformat(), recipe_id),
-        )
+def add_to_plan(conn: sqlite3.Connection, week: date, recipe_id: int) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO plan (week, recipe_id) VALUES (?, ?)",
+        (week_start(week).isoformat(), recipe_id),
+    )
+    conn.commit()
+
+
+def remove_from_plan(conn: sqlite3.Connection, week: date, recipe_id: int) -> None:
+    conn.execute(
+        "DELETE FROM plan WHERE week = ? AND recipe_id = ?",
+        (week_start(week).isoformat(), recipe_id),
+    )
     conn.commit()
 
 

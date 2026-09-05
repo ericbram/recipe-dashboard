@@ -228,47 +228,72 @@ def test_title_cannot_break_out_of_delete_confirm_js(client):
     assert "alert(1)" not in onsubmit
 
 
-def test_plan_shows_seven_days(client):
+def test_plan_starts_empty_with_a_picker(client):
     body = client.get("/plan", params={"week": "2026-09-03"}).text
-    for name in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]:
-        assert name in body
+    assert "Nothing picked for this week yet" in body
+    assert 'action="/plan/add"' in body
 
 
 def test_plan_defaults_to_this_week(client):
     assert client.get("/plan").status_code == 200
 
 
-def test_assign_a_recipe_to_a_day(client):
+def test_add_a_recipe_to_the_week(client):
     rid = db.create_recipe(client.conn, "Chili")
-    resp = client.post("/plan/2026-09-02", data={"recipe_id": str(rid)},
+    resp = client.post("/plan/add", data={"week": "2026-09-02", "recipe_id": str(rid)},
                        headers={"HX-Request": "true"})
     assert resp.status_code == 200
     assert "Chili" in resp.text
-    assert dict(db.get_plan(client.conn, date(2026, 8, 31)))[date(2026, 9, 2)]["title"] == "Chili"
+    assert [r["title"] for r in db.get_plan(client.conn, date(2026, 8, 31))] == ["Chili"]
 
 
-def test_assign_without_hx_header_redirects(client):
+def test_add_several_and_they_all_stay(client):
+    for t in ["Chili", "Stew", "Tacos"]:
+        rid = db.create_recipe(client.conn, t)
+        client.post("/plan/add", data={"week": "2026-09-02", "recipe_id": str(rid)})
+    titles = [r["title"] for r in db.get_plan(client.conn, date(2026, 8, 31))]
+    assert titles == ["Chili", "Stew", "Tacos"]
+
+
+def test_remove_takes_one_off_and_leaves_the_rest(client):
+    ids = {t: db.create_recipe(client.conn, t) for t in ["Chili", "Stew"]}
+    for rid in ids.values():
+        client.post("/plan/add", data={"week": "2026-09-02", "recipe_id": str(rid)})
+    resp = client.post("/plan/remove",
+                       data={"week": "2026-09-02", "recipe_id": str(ids["Chili"])},
+                       headers={"HX-Request": "true"})
+    assert resp.status_code == 200
+    assert [r["title"] for r in db.get_plan(client.conn, date(2026, 8, 31))] == ["Stew"]
+
+
+def test_a_recipe_already_on_the_list_is_not_offered_again(client):
     rid = db.create_recipe(client.conn, "Chili")
-    resp = client.post("/plan/2026-09-02", data={"recipe_id": str(rid)}, follow_redirects=False)
+    assert f'<option value="{rid}"' in client.get("/plan", params={"week": "2026-09-02"}).text
+    client.post("/plan/add", data={"week": "2026-09-02", "recipe_id": str(rid)})
+    body = client.get("/plan", params={"week": "2026-09-02"}).text
+    assert f'<option value="{rid}"' not in body
+    assert "Chili" in body  # still shown, as a picked item
+
+
+def test_add_without_hx_header_redirects_to_the_week(client):
+    rid = db.create_recipe(client.conn, "Chili")
+    resp = client.post("/plan/add", data={"week": "2026-09-02", "recipe_id": str(rid)},
+                       follow_redirects=False)
     assert resp.status_code == 303
-    assert resp.headers["location"] == "/plan?week=2026-09-02"
-    assert dict(db.get_plan(client.conn, date(2026, 8, 31)))[date(2026, 9, 2)]["title"] == "Chili"
+    assert resp.headers["location"] == "/plan?week=2026-08-31"
 
 
 def test_non_numeric_recipe_id_is_400(client):
-    assert client.post("/plan/2026-09-02", data={"recipe_id": "abc"}).status_code == 400
+    assert client.post("/plan/add", data={"week": "2026-09-02", "recipe_id": "abc"}).status_code == 400
 
 
-def test_clear_a_day(client):
-    rid = db.create_recipe(client.conn, "Chili")
-    db.set_plan(client.conn, date(2026, 9, 2), rid)
-    client.post("/plan/2026-09-02", data={"recipe_id": ""}, headers={"HX-Request": "true"})
-    assert dict(db.get_plan(client.conn, date(2026, 8, 31)))[date(2026, 9, 2)] is None
+def test_adding_a_missing_recipe_is_404(client):
+    assert client.post("/plan/add", data={"week": "2026-09-02", "recipe_id": "9999"}).status_code == 404
 
 
-def test_plan_renders_the_assigned_recipe(client):
+def test_plan_renders_the_picked_recipe(client):
     rid = db.create_recipe(client.conn, "Weeknight Chili")
-    db.set_plan(client.conn, date(2026, 9, 2), rid)
+    db.add_to_plan(client.conn, date(2026, 9, 2), rid)
     assert "Weeknight Chili" in client.get("/plan", params={"week": "2026-09-03"}).text
 
 
@@ -276,15 +301,15 @@ def test_bad_week_param_is_400(client):
     assert client.get("/plan", params={"week": "not-a-date"}).status_code == 400
 
 
-def test_bad_plan_date_is_400(client):
-    assert client.post("/plan/nonsense", data={"recipe_id": ""}).status_code == 400
+def test_bad_week_on_add_is_400(client):
+    assert client.post("/plan/add", data={"week": "nonsense", "recipe_id": "1"}).status_code == 400
 
 
 def test_htmx_error_returns_a_bare_message_not_a_page(client):
     """htmx will not swap a non-2xx page, so errors must come back as text."""
     resp = client.post(
-        "/plan/2026-09-07",
-        data={"recipe_id": "9999"},
+        "/plan/add",
+        data={"week": "2026-09-02", "recipe_id": "9999"},
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 404
@@ -293,7 +318,7 @@ def test_htmx_error_returns_a_bare_message_not_a_page(client):
 
 
 def test_non_htmx_error_still_renders_the_full_page(client):
-    resp = client.post("/plan/2026-09-07", data={"recipe_id": "9999"})
+    resp = client.post("/plan/add", data={"week": "2026-09-02", "recipe_id": "9999"})
     assert resp.status_code == 404
     assert "<!doctype" in resp.text.lower()
 
@@ -370,8 +395,8 @@ def _stock_the_week(client):
         "title": "Chili", "ingredients": ["1 lb ground beef", "1 onion, diced"]}).json()
     soup = client.post("/api/recipes", json={
         "title": "Soup", "ingredients": ["1 onion, diced", "4 cups stock"]}).json()
-    client.post("/plan/2026-08-31", data={"recipe_id": str(beef["id"])})
-    client.post("/plan/2026-09-02", data={"recipe_id": str(soup["id"])})
+    client.post("/plan/add", data={"week": "2026-08-31", "recipe_id": str(beef["id"])})
+    client.post("/plan/add", data={"week": "2026-08-31", "recipe_id": str(soup["id"])})
     return beef, soup
 
 
@@ -386,7 +411,7 @@ def test_grocery_page_lists_the_weeks_ingredients(client):
     assert resp.text.count('value="1 onion, diced"') == 1
     assert resp.text.count('type="checkbox"') == 3
     assert "Chili, Soup" in resp.text
-    assert "3 items for 2 dinners" in resp.text
+    assert "3 items for 2 recipes" in resp.text
 
 
 def test_grocery_page_is_empty_when_nothing_is_planned(client):

@@ -12,8 +12,8 @@
     <button type="button" class="chip" id="clear-checks">Uncheck all</button>
   </p>
 
-  <p class="muted">{{ items | length }} items for {{ dinners | length }} dinner{{ '' if dinners | length == 1 else 's' }}:
-    {{ dinners | map(attribute=1) | map(attribute='title') | unique | join(', ') }}</p>
+  <p class="muted">{{ items | length }} items for {{ dinners | length }} recipe{{ '' if dinners | length == 1 else 's' }}:
+    {{ dinners | map(attribute='title') | join(', ') }}</p>
 
   {% if unsorted %}
     <p class="muted">{{ unsorted }} not yet in an aisle — ask Claude to <code>sort my grocery list</code>.</p>

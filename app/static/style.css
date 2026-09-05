@@ -23,11 +23,15 @@ textarea { width:100%; min-height:8rem; }
 .stars { margin-left:auto; color:var(--accent); white-space:nowrap; }
 .tags { color:var(--muted); font-size:.85rem; }
 .empty { color:var(--muted); }
-.week { display:grid; gap:.5rem; }
-.day { display:flex; align-items:center; gap:.75rem; padding:.75rem 1rem;
+.picked { list-style:none; padding:0; margin:1rem 0; display:grid; gap:.5rem; }
+.picked li { display:flex; align-items:center; gap:.75rem; padding:.75rem 1rem;
   background:#fff; border:1px solid var(--line); border-radius:8px; }
-.day .name { width:6.5rem; color:var(--muted); }
-.day.today { border-color:var(--accent); }
+.picked .what { flex:1; color:var(--fg); text-decoration:none; }
+.picked .what:hover { text-decoration:underline; }
+.picked form { margin:0; }
+.picked .remove { background:none; border:0; color:var(--muted); cursor:pointer;
+  font-size:1rem; padding:.15rem .4rem; border-radius:4px; }
+.picked .remove:hover { color:#a11; background:rgba(170,17,17,.08); }
 .error { color:#a11; }
 #flash { margin:1rem 1rem 0; padding:.6rem .9rem; border:1px solid #a11; border-radius:8px; }
 .paste { margin-bottom:1rem; }
@@ -57,5 +61,5 @@ button.chip { font:inherit; cursor:pointer; }
 .field input, .field textarea { width:100%; }
 @media (prefers-color-scheme: dark) {
   :root { --bg:#1b1a18; --fg:#ece8e2; --muted:#9a938c; --line:#35322e; --accent:#e0813f; }
-  input, select, textarea, button, .card, .day, .chip { background:#232120; }
+  input, select, textarea, button, .card, .picked li, .chip { background:#232120; }
 }

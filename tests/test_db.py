@@ -31,7 +31,7 @@ def test_rows_are_mappings(conn):
 def test_foreign_keys_cascade(conn):
     conn.execute("INSERT INTO recipes (id, title, created_at) VALUES (1, 'Chili', '2026-09-01')")
     conn.execute("INSERT INTO recipe_tags (recipe_id, tag) VALUES (1, 'dinner')")
-    conn.execute("INSERT INTO plan (date, recipe_id) VALUES ('2026-09-01', 1)")
+    conn.execute("INSERT INTO plan (week, recipe_id) VALUES ('2026-08-31', 1)")
     conn.execute("DELETE FROM recipes WHERE id = 1")
     assert conn.execute("SELECT COUNT(*) c FROM recipe_tags").fetchone()["c"] == 0
     assert conn.execute("SELECT COUNT(*) c FROM plan").fetchone()["c"] == 0
@@ -185,39 +185,110 @@ def test_week_start_returns_monday():
     assert db.week_start(date(2026, 9, 6)) == date(2026, 8, 31)   # Sunday -> Monday
 
 
-def test_get_plan_returns_seven_days(conn):
-    week = db.get_plan(conn, date(2026, 8, 31))
-    expected = [date(2026, 8, 31) + timedelta(days=i) for i in range(7)]
-    assert [d for d, _ in week] == expected
-    assert all(recipe is None for _, recipe in week)
+def test_a_new_week_is_empty(conn):
+    assert db.get_plan(conn, date(2026, 8, 31)) == []
 
 
-def test_set_and_read_plan(conn):
+def test_add_and_read_the_week(conn):
+    a = db.create_recipe(conn, "Stew")
+    b = db.create_recipe(conn, "Chili")
+    db.add_to_plan(conn, date(2026, 9, 2), a)
+    db.add_to_plan(conn, date(2026, 9, 4), b)
+    # Any day in the week resolves to the same Monday-keyed list, alphabetical.
+    assert [r["title"] for r in db.get_plan(conn, date(2026, 8, 31))] == ["Chili", "Stew"]
+    assert [r["title"] for r in db.get_plan(conn, date(2026, 9, 6))] == ["Chili", "Stew"]
+
+
+def test_adding_the_same_recipe_twice_is_a_no_op(conn):
     rid = db.create_recipe(conn, "Chili")
-    db.set_plan(conn, date(2026, 9, 2), rid)
-    week = dict(db.get_plan(conn, date(2026, 8, 31)))
-    assert week[date(2026, 9, 2)]["title"] == "Chili"
-    assert week[date(2026, 9, 1)] is None
+    db.add_to_plan(conn, date(2026, 9, 2), rid)
+    db.add_to_plan(conn, date(2026, 9, 5), rid)
+    assert len(db.get_plan(conn, date(2026, 8, 31))) == 1
 
 
-def test_set_plan_replaces_existing_day(conn):
+def test_remove_takes_it_off_the_week(conn):
     a = db.create_recipe(conn, "Chili")
     b = db.create_recipe(conn, "Stew")
-    db.set_plan(conn, date(2026, 9, 2), a)
-    db.set_plan(conn, date(2026, 9, 2), b)
-    week = dict(db.get_plan(conn, date(2026, 8, 31)))
-    assert week[date(2026, 9, 2)]["title"] == "Stew"
+    db.add_to_plan(conn, date(2026, 9, 2), a)
+    db.add_to_plan(conn, date(2026, 9, 2), b)
+    db.remove_from_plan(conn, date(2026, 9, 6), a)
+    assert [r["title"] for r in db.get_plan(conn, date(2026, 8, 31))] == ["Stew"]
 
 
-def test_set_plan_none_clears_day(conn):
+def test_removing_something_not_on_the_list_is_harmless(conn):
     rid = db.create_recipe(conn, "Chili")
-    db.set_plan(conn, date(2026, 9, 2), rid)
-    db.set_plan(conn, date(2026, 9, 2), None)
-    assert dict(db.get_plan(conn, date(2026, 8, 31)))[date(2026, 9, 2)] is None
+    db.remove_from_plan(conn, date(2026, 9, 2), rid)
+    assert db.get_plan(conn, date(2026, 8, 31)) == []
+
+
+def test_weeks_do_not_bleed_into_each_other(conn):
+    rid = db.create_recipe(conn, "Chili")
+    db.add_to_plan(conn, date(2026, 9, 2), rid)
+    assert db.get_plan(conn, date(2026, 9, 9)) == []
 
 
 def test_deleting_recipe_clears_it_from_plan(conn):
     rid = db.create_recipe(conn, "Chili")
-    db.set_plan(conn, date(2026, 9, 2), rid)
+    db.add_to_plan(conn, date(2026, 9, 2), rid)
     db.delete_recipe(conn, rid)
-    assert dict(db.get_plan(conn, date(2026, 8, 31)))[date(2026, 9, 2)] is None
+    assert db.get_plan(conn, date(2026, 8, 31)) == []
+
+
+OLD_PLAN_SCHEMA = """
+CREATE TABLE recipes (
+  id INTEGER PRIMARY KEY, title TEXT NOT NULL, source_url TEXT,
+  ingredients TEXT NOT NULL DEFAULT '', steps TEXT NOT NULL DEFAULT '',
+  rating INTEGER, notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
+CREATE TABLE plan (
+  date TEXT PRIMARY KEY,
+  recipe_id INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE);
+"""
+
+
+def _old_style_db(tmp_path, rows):
+    c = db.connect(str(tmp_path / "old.db"))
+    c.executescript(OLD_PLAN_SCHEMA)
+    for i, (day, title) in enumerate(rows, start=1):
+        c.execute("INSERT INTO recipes (id,title,created_at) VALUES (?,?,'2026-09-01')", (i, title))
+        c.execute("INSERT INTO plan (date, recipe_id) VALUES (?, ?)", (day, i))
+    c.commit()
+    return c
+
+
+def test_migration_folds_daily_rows_onto_their_week(tmp_path):
+    c = _old_style_db(tmp_path, [("2026-08-31", "Chili"), ("2026-09-04", "Stew")])
+    db.init_schema(c)
+    assert [r["title"] for r in db.get_plan(c, date(2026, 9, 2))] == ["Chili", "Stew"]
+    cols = {r["name"] for r in c.execute("PRAGMA table_info(plan)")}
+    assert cols == {"week", "recipe_id"}
+    assert c.execute(
+        "SELECT COUNT(*) c FROM sqlite_master WHERE name='plan_by_day'").fetchone()["c"] == 0
+    c.close()
+
+
+def test_migration_collapses_a_recipe_cooked_on_two_days(tmp_path):
+    c = db.connect(str(tmp_path / "dupe.db"))
+    c.executescript(OLD_PLAN_SCHEMA)
+    c.execute("INSERT INTO recipes (id,title,created_at) VALUES (1,'Chili','2026-09-01')")
+    c.execute("INSERT INTO plan (date, recipe_id) VALUES ('2026-08-31', 1)")
+    c.execute("INSERT INTO plan (date, recipe_id) VALUES ('2026-09-03', 1)")
+    c.commit()
+    db.init_schema(c)
+    assert [r["title"] for r in db.get_plan(c, date(2026, 8, 31))] == ["Chili"]
+    c.close()
+
+
+def test_migration_splits_rows_across_different_weeks(tmp_path):
+    c = _old_style_db(tmp_path, [("2026-08-31", "Chili"), ("2026-09-08", "Stew")])
+    db.init_schema(c)
+    assert [r["title"] for r in db.get_plan(c, date(2026, 8, 31))] == ["Chili"]
+    assert [r["title"] for r in db.get_plan(c, date(2026, 9, 7))] == ["Stew"]
+    c.close()
+
+
+def test_migration_is_idempotent(tmp_path):
+    c = _old_style_db(tmp_path, [("2026-09-02", "Chili")])
+    db.init_schema(c)
+    db.init_schema(c)
+    assert [r["title"] for r in db.get_plan(c, date(2026, 8, 31))] == ["Chili"]
+    c.close()
