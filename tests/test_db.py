@@ -292,3 +292,40 @@ def test_migration_is_idempotent(tmp_path):
     db.init_schema(c)
     assert [r["title"] for r in db.get_plan(c, date(2026, 8, 31))] == ["Chili"]
     c.close()
+
+
+def test_staples_round_trip_and_dedupe(conn):
+    db.add_staple(conn, "Milk")
+    db.add_staple(conn, "  Milk  ")          # same thing, normalized
+    db.add_staple(conn, "Coffee")
+    assert [s["line"] for s in db.get_staples(conn)] == ["Coffee", "Milk"]
+
+
+def test_a_blank_staple_is_rejected(conn):
+    with pytest.raises(ValueError):
+        db.add_staple(conn, "   ")
+    assert db.get_staples(conn) == []
+
+
+def test_remove_staple(conn):
+    db.add_staple(conn, "Milk")
+    db.remove_staple(conn, db.get_staples(conn)[0]["id"])
+    assert db.get_staples(conn) == []
+
+
+def test_pantry_marks_are_per_week(conn):
+    db.set_pantry(conn, date(2026, 9, 2), "1 lb beef", have=True)
+    assert db.get_pantry(conn, date(2026, 8, 31)) == {"1 lb beef"}
+    assert db.get_pantry(conn, date(2026, 9, 9)) == set(), "last week must not carry over"
+
+
+def test_pantry_unmark(conn):
+    db.set_pantry(conn, date(2026, 9, 2), "1 lb beef", have=True)
+    db.set_pantry(conn, date(2026, 9, 4), "1 lb beef", have=False)
+    assert db.get_pantry(conn, date(2026, 8, 31)) == set()
+
+
+def test_marking_twice_is_a_no_op(conn):
+    for _ in range(2):
+        db.set_pantry(conn, date(2026, 9, 2), "1 lb beef", have=True)
+    assert db.get_pantry(conn, date(2026, 8, 31)) == {"1 lb beef"}

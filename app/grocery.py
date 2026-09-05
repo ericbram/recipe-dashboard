@@ -32,15 +32,38 @@ AISLES = (
 UNSORTED = "unsorted"
 
 
+STAPLE = "Staple"
+
+
+def check_key(line: str) -> str:
+    """The identity of one row on the kitchen check — the line, normalized.
+
+    Distinct from sort_key: two amounts of the same thing are two rows to tick
+    off ("1 lb beef" and "2 lbs beef" are separate buys) but share one aisle.
+    """
+    return " ".join(line.lower().split())
+
+
 @dataclass
 class Item:
     line: str
-    #: Titles of the shortlisted recipes that need this line. A recipe appears
-    #: at most once in a week's shortlist, so these are always distinct.
+    #: Titles of the shortlisted recipes that need this line, plus "Staple" if
+    #: it is on the always-check list. A recipe appears at most once in a
+    #: week's shortlist, so these are always distinct.
     sources: list[str] = field(default_factory=list)
     #: sort_key(line) — the identity the learned aisle map is keyed by.
     key: str = ""
     aisle: str = UNSORTED
+    #: True when this week's kitchen check says we already have it.
+    have: bool = False
+
+    @property
+    def check_id(self) -> str:
+        return check_key(self.line)
+
+    @property
+    def is_staple(self) -> bool:
+        return STAPLE in self.sources
 
     @property
     def summary(self) -> str:
@@ -66,34 +89,51 @@ def sort_key(line: str) -> str:
     return " ".join(words) or line.lower().strip()
 
 
-def build_list(planned, known_aisles: dict[str, str] | None = None) -> list[Item]:
-    """planned is db.get_plan()'s list of recipe rows.
+def build_list(planned, known_aisles=None, staples=(), have=()) -> list[Item]:
+    """Everything the week proposes: the shortlisted recipes' ingredients plus
+    the always-check staples.
 
-    known_aisles is db.get_aisles() — anything not in it stays UNSORTED until
-    the grocery-sort skill fills it in.
+    - `planned`  db.get_plan()'s recipe rows
+    - `known_aisles`  db.get_aisles(); anything missing stays UNSORTED
+    - `staples`  db.get_staples() rows, folded in as their own source
+    - `have`  db.get_pantry(); item keys already in the kitchen
+
+    Returns the whole proposed list — filter with `to_buy` for the shopping
+    list, so the kitchen check can still show what was ticked off.
     """
     known_aisles = known_aisles or {}
+    have = set(have)
     items: dict[str, Item] = {}
+
+    def add(line: str, source: str) -> None:
+        line = line.strip()
+        if not line:
+            return
+        cid = check_key(line)
+        if cid not in items:
+            key = sort_key(line)
+            items[cid] = Item(
+                line=line, key=key,
+                aisle=known_aisles.get(key, UNSORTED),
+                have=cid in have,
+            )
+        if source not in items[cid].sources:
+            items[cid].sources.append(source)
+
     for recipe in planned:
         if recipe is None:
             continue
-        seen_today: set[str] = set()
         for raw in (recipe["ingredients"] or "").splitlines():
-            line = raw.strip()
-            if not line:
-                continue
-            dupe_key = " ".join(line.lower().split())
-            if dupe_key in seen_today:
-                continue  # one recipe listing a thing twice still buys it once
-            seen_today.add(dupe_key)
-            if dupe_key not in items:
-                key = sort_key(line)
-                items[dupe_key] = Item(
-                    line=line, key=key,
-                    aisle=known_aisles.get(key, UNSORTED),
-                )
-            items[dupe_key].sources.append(recipe["title"])
+            add(raw, recipe["title"])
+    for staple in staples:
+        add(staple["line"], STAPLE)
+
     return sorted(items.values(), key=lambda i: (i.key, i.line.lower()))
+
+
+def to_buy(items) -> list[Item]:
+    """Only what the kitchen check did not tick off."""
+    return [i for i in items if not i.have]
 
 
 def group_by_aisle(items) -> list[tuple[str, list[Item]]]:

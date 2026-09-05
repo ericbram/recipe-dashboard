@@ -437,7 +437,7 @@ def test_grocery_api_reports_what_needs_sorting(client):
     assert sorted(body["unsorted_keys"]) == ["ground beef", "onion diced", "stock"]
     beef = next(i for i in body["items"] if i["line"] == "1 lb ground beef")
     assert beef == {"line": "1 lb ground beef", "key": "ground beef",
-                    "aisle": "unsorted", "sources": ["Chili"]}
+                    "aisle": "unsorted", "sources": ["Chili"], "have": False}
 
 
 def test_learned_aisles_apply_and_shrink_the_next_run(client):
@@ -471,3 +471,94 @@ def test_aisles_api_rejects_a_name_outside_the_vocabulary(client):
 def test_aisles_api_rejects_an_empty_or_non_object_body(client):
     assert client.post("/api/aisles", json={}).status_code == 400
     assert client.post("/api/aisles", json=["beef", "meat"]).status_code == 400
+
+
+def test_kitchen_lists_ingredients_and_staples_together(client):
+    _stock_the_week(client)
+    db.add_staple(client.conn, "Milk")
+    body = client.get("/kitchen?week=2026-09-01").text
+    assert "1 lb ground beef" in body
+    assert "Milk" in body
+    assert "3 proposed" not in body        # 3 ingredients + 1 staple
+    assert "4 proposed" in body
+
+
+def test_ticking_an_item_removes_it_from_the_grocery_list(client):
+    _stock_the_week(client)
+    resp = client.post("/kitchen/have", data={
+        "week": "2026-09-01", "item_key": "1 lb ground beef", "have": "1",
+    }, headers={"HX-Request": "true"})
+    assert resp.status_code == 200
+
+    assert db.get_pantry(client.conn, date(2026, 8, 31)) == {"1 lb ground beef"}
+    grocery_page = client.get("/grocery?week=2026-09-01").text
+    assert "1 lb ground beef" not in grocery_page
+    assert "4 cups stock" in grocery_page
+    assert "1 already in the kitchen" in grocery_page
+
+
+def test_unticking_puts_it_back_on_the_grocery_list(client):
+    _stock_the_week(client)
+    for flag in ("1", "0"):
+        client.post("/kitchen/have", data={
+            "week": "2026-09-01", "item_key": "1 lb ground beef", "have": flag})
+    assert "1 lb ground beef" in client.get("/grocery?week=2026-09-01").text
+
+
+def test_the_tick_is_keyed_by_line_not_by_display_case(client):
+    _stock_the_week(client)
+    client.post("/kitchen/have", data={
+        "week": "2026-09-01", "item_key": "  1 LB Ground Beef  ", "have": "1"})
+    assert db.get_pantry(client.conn, date(2026, 8, 31)) == {"1 lb ground beef"}
+
+
+def test_a_staple_appears_on_the_grocery_list_until_ticked(client):
+    db.add_staple(client.conn, "Milk")
+    assert "Milk" in client.get("/grocery?week=2026-09-01").text
+    client.post("/kitchen/have", data={"week": "2026-09-01", "item_key": "Milk", "have": "1"})
+    assert "Milk" not in client.get("/grocery?week=2026-09-01").text
+
+
+def test_add_and_remove_a_staple_through_the_page(client):
+    resp = client.post("/staples/add", data={"week": "2026-09-01", "line": "Coffee"},
+                       headers={"HX-Request": "true"})
+    assert resp.status_code == 200
+    assert "Coffee" in resp.text
+    sid = db.get_staples(client.conn)[0]["id"]
+    client.post("/staples/remove", data={"week": "2026-09-01", "staple_id": str(sid)})
+    assert db.get_staples(client.conn) == []
+
+
+def test_a_blank_staple_is_a_400(client):
+    assert client.post("/staples/add", data={"week": "2026-09-01", "line": "  "}).status_code == 400
+
+
+def test_kitchen_toggle_without_hx_redirects(client):
+    _stock_the_week(client)
+    resp = client.post("/kitchen/have", data={
+        "week": "2026-09-01", "item_key": "1 lb ground beef", "have": "1"},
+        follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/kitchen?week=2026-08-31"
+
+
+def test_api_grocery_reports_the_have_flag(client):
+    _stock_the_week(client)
+    client.post("/kitchen/have", data={
+        "week": "2026-09-01", "item_key": "1 lb ground beef", "have": "1"})
+    body = client.get("/api/grocery?week=2026-09-01").json()
+    flags = {i["line"]: i["have"] for i in body["items"]}
+    assert flags["1 lb ground beef"] is True
+    assert flags["4 cups stock"] is False
+    # Still listed, so its aisle can be learned even though we are not buying it.
+    assert "ground beef" in body["unsorted_keys"]
+
+
+def test_grocery_says_you_have_everything_rather_than_nothing_is_planned(client):
+    """An empty list because you own it all must not read as an empty week."""
+    rid = client.post("/api/recipes", json={"title": "Toast", "ingredients": ["Bread"]}).json()["id"]
+    client.post("/plan/add", data={"week": "2026-09-01", "recipe_id": str(rid)})
+    client.post("/kitchen/have", data={"week": "2026-09-01", "item_key": "Bread", "have": "1"})
+    body = client.get("/grocery?week=2026-09-01").text
+    assert "Nothing to buy" in body
+    assert "Nothing planned this week yet" not in body

@@ -4,7 +4,10 @@
 <h1>Grocery list</h1>
 <p class="muted">{{ start.strftime('%B %-d') }} – {{ end.strftime('%B %-d') }}</p>
 
-{% if not items %}
+{% if not items and have_count %}
+  <p class="empty">Nothing to buy — all {{ have_count }} proposed items are already in the kitchen.
+    <a href="/kitchen?week={{ start.isoformat() }}">Change what you have</a>.</p>
+{% elif not items %}
   <p class="empty">Nothing planned this week yet. <a href="/plan?week={{ start.isoformat() }}">Plan some dinners</a> and the list fills itself in.</p>
 {% else %}
   <p class="chips">
@@ -14,6 +17,10 @@
 
   <p class="muted">{{ items | length }} items for {{ dinners | length }} recipe{{ '' if dinners | length == 1 else 's' }}:
     {{ dinners | map(attribute='title') | join(', ') }}</p>
+  {% if have_count %}
+    <p class="muted">{{ have_count }} already in the kitchen, not listed —
+      <a href="/kitchen?week={{ start.isoformat() }}">change what you have</a>.</p>
+  {% endif %}
 
   {% if unsorted %}
     <p class="muted">{{ unsorted }} not yet in an aisle — ask Claude to <code>sort my grocery list</code>.</p>

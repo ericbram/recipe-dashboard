@@ -270,23 +270,101 @@ def plan_week(request: Request, week: str = "", conn=Depends(get_db)):
 
 
 def _week_items(conn, week: str):
+    """The whole proposed list for a week: recipe ingredients + staples, with
+    each item flagged by what the kitchen check said."""
     start = db.week_start(_parse_date(week) if week else date.today())
     planned = db.get_plan(conn, start)
-    return start, planned, grocery.build_list(planned, db.get_aisles(conn))
+    items = grocery.build_list(
+        planned,
+        known_aisles=db.get_aisles(conn),
+        staples=db.get_staples(conn),
+        have=db.get_pantry(conn, start),
+    )
+    return start, planned, items
+
+
+def _kitchen_ctx(conn, start: date) -> dict:
+    planned = db.get_plan(conn, start)
+    items = grocery.build_list(
+        planned,
+        known_aisles=db.get_aisles(conn),
+        staples=db.get_staples(conn),
+        have=db.get_pantry(conn, start),
+    )
+    return {
+        "groups": grocery.group_by_aisle(items),
+        "items": items,
+        "recipes": planned,
+        "staples": db.get_staples(conn),
+        "start": start,
+        "prev": start - timedelta(days=7),
+        "next": start + timedelta(days=7),
+        "have_count": sum(1 for i in items if i.have),
+        "buy_count": len(grocery.to_buy(items)),
+    }
+
+
+@app.get("/kitchen", response_class=HTMLResponse)
+def kitchen_check(request: Request, week: str = "", conn=Depends(get_db)):
+    """The step between planning and shopping: tick off what you already have."""
+    start = db.week_start(_parse_date(week) if week else date.today())
+    return templates.TemplateResponse(request, "kitchen.html", _kitchen_ctx(conn, start))
+
+
+@app.post("/kitchen/have", response_class=HTMLResponse)
+def kitchen_toggle(request: Request, week: str = Form(""), item_key: str = Form(""),
+                   have: str = Form(""), conn=Depends(get_db)):
+    start = db.week_start(_parse_date(week) if week else date.today())
+    key = grocery.check_key(item_key)
+    if not key:
+        raise HTTPException(status_code=400, detail="Which item?")
+    db.set_pantry(conn, start, key, have=have.lower() in ("1", "true", "on", "yes"))
+    if not request.headers.get("HX-Request"):
+        return RedirectResponse(f"/kitchen?week={start.isoformat()}", status_code=303)
+    return templates.TemplateResponse(request, "_kitchen.html", _kitchen_ctx(conn, start))
+
+
+@app.post("/staples/add", response_class=HTMLResponse)
+def staple_add(request: Request, week: str = Form(""), line: str = Form(""),
+               conn=Depends(get_db)):
+    start = db.week_start(_parse_date(week) if week else date.today())
+    try:
+        db.add_staple(conn, line)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not request.headers.get("HX-Request"):
+        return RedirectResponse(f"/kitchen?week={start.isoformat()}", status_code=303)
+    return templates.TemplateResponse(request, "_kitchen.html", _kitchen_ctx(conn, start))
+
+
+@app.post("/staples/remove", response_class=HTMLResponse)
+def staple_remove(request: Request, week: str = Form(""), staple_id: str = Form(""),
+                  conn=Depends(get_db)):
+    start = db.week_start(_parse_date(week) if week else date.today())
+    try:
+        db.remove_staple(conn, int(staple_id))
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Not a staple id: {staple_id!r}")
+    if not request.headers.get("HX-Request"):
+        return RedirectResponse(f"/kitchen?week={start.isoformat()}", status_code=303)
+    return templates.TemplateResponse(request, "_kitchen.html", _kitchen_ctx(conn, start))
 
 
 @app.get("/grocery", response_class=HTMLResponse)
 def grocery_week(request: Request, week: str = "", conn=Depends(get_db)):
     start, planned, items = _week_items(conn, week)
+    buying = grocery.to_buy(items)
     return templates.TemplateResponse(
         request, "grocery.html",
         {
-            "groups": grocery.group_by_aisle(items),
-            "items": items,
+            "groups": grocery.group_by_aisle(buying),
+            "items": buying,
             "dinners": planned,
             "start": start,
             "end": start + timedelta(days=6),
-            "unsorted": sum(1 for i in items if i.aisle == grocery.UNSORTED),
+            "unsorted": sum(1 for i in buying if i.aisle == grocery.UNSORTED),
+            # Shown so the list never looks mysteriously short.
+            "have_count": len(items) - len(buying),
         },
     )
 
@@ -296,14 +374,17 @@ def grocery_api(week: str = "", conn=Depends(get_db)):
     """The week's list as JSON, for the `grocery-sort` skill.
 
     `key` is the stable identity to send back to /api/aisles; `aisle` is
-    "unsorted" for anything not yet learned.
+    "unsorted" for anything not yet learned. `have` is what the kitchen check
+    ticked off — those are excluded from the shopping list but still listed
+    here, so an aisle gets learned once even for something usually in stock.
     """
     start, _planned, items = _week_items(conn, week)
     return {
         "week_start": start.isoformat(),
         "aisles": list(grocery.AISLES),
         "items": [
-            {"line": i.line, "key": i.key, "aisle": i.aisle, "sources": i.sources}
+            {"line": i.line, "key": i.key, "aisle": i.aisle,
+             "sources": i.sources, "have": i.have}
             for i in items
         ],
         "unsorted_keys": sorted({i.key for i in items if i.aisle == grocery.UNSORTED}),

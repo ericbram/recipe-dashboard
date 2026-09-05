@@ -29,6 +29,6 @@
       {% endfor %}
     </ul>
     <p class="muted">{{ chosen | length }} recipe{{ '' if chosen | length == 1 else 's' }} ·
-      <a href="/grocery?week={{ start.isoformat() }}">Grocery list</a></p>
+      <a href="/kitchen?week={{ start.isoformat() }}">Check the kitchen →</a></p>
   {% endif %}
 </div>

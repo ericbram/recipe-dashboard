@@ -33,6 +33,23 @@ textarea { width:100%; min-height:8rem; }
   font-size:1rem; padding:.15rem .4rem; border-radius:4px; }
 .picked .remove:hover { color:#a11; background:rgba(170,17,17,.08); }
 .error { color:#a11; }
+.kitchen { margin:1rem 0; }
+.kitchen ul { list-style:none; padding:0; margin:0 0 1.25rem; }
+.kitchen li { display:flex; align-items:center; gap:.75rem; padding:.5rem .25rem;
+  border-bottom:1px solid var(--line); }
+.kitchen .tick { width:1.6rem; height:1.6rem; flex:none; border-radius:5px; cursor:pointer;
+  border:1px solid var(--line); background:transparent; color:var(--accent);
+  font-size:.9rem; line-height:1; }
+.kitchen .tick:hover { border-color:var(--accent); }
+.kitchen li.have .tick { background:var(--accent); border-color:var(--accent); color:#fff; }
+.kitchen li.have .what { text-decoration:line-through; color:var(--muted); }
+.kitchen .what { flex:1; }
+.kitchen .who { font-size:.8rem; color:var(--muted); text-align:right; }
+.kitchen .who.staple { color:var(--accent); }
+.kitchen form { margin:0; display:flex; }
+.staples { margin-top:1.5rem; }
+.staples summary { cursor:pointer; color:var(--muted); }
+.staples form.filters { margin-top:.75rem; }
 #flash { margin:1rem 1rem 0; padding:.6rem .9rem; border:1px solid #a11; border-radius:8px; }
 .paste { margin-bottom:1rem; }
 .paste summary { cursor:pointer; color:var(--muted); }

@@ -29,6 +29,22 @@ CREATE TABLE IF NOT EXISTS plan (
   PRIMARY KEY (week, recipe_id)
 );
 
+-- Things the household buys regardless of what is being cooked. They join
+-- every week's kitchen check alongside the recipe ingredients.
+CREATE TABLE IF NOT EXISTS staples (
+  id   INTEGER PRIMARY KEY,
+  line TEXT NOT NULL UNIQUE
+);
+
+-- "We already have this, do not buy it." One row per item marked in the
+-- kitchen check; absence means it still needs buying. Keyed per week so last
+-- week's answers do not silently carry over.
+CREATE TABLE IF NOT EXISTS pantry (
+  week     TEXT NOT NULL,
+  item_key TEXT NOT NULL,
+  PRIMARY KEY (week, item_key)
+);
+
 -- What aisle an ingredient lives in, learned once and reused forever.
 -- Keyed by grocery.sort_key(line), so "1 lb ground beef" and "2 lbs ground
 -- beef" share the one entry. Populated by the grocery-sort agent skill.
@@ -249,3 +265,41 @@ def set_aisles(conn: sqlite3.Connection, mapping: dict[str, str]) -> int:
     )
     conn.commit()
     return len(rows)
+
+
+def get_staples(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute("SELECT id, line FROM staples ORDER BY line COLLATE NOCASE").fetchall()
+
+
+def add_staple(conn: sqlite3.Connection, line: str) -> None:
+    line = " ".join((line or "").split())
+    if not line:
+        raise ValueError("a staple needs a name")
+    conn.execute("INSERT OR IGNORE INTO staples (line) VALUES (?)", (line,))
+    conn.commit()
+
+
+def remove_staple(conn: sqlite3.Connection, staple_id: int) -> None:
+    conn.execute("DELETE FROM staples WHERE id = ?", (staple_id,))
+    conn.commit()
+
+
+def get_pantry(conn: sqlite3.Connection, week: date) -> set[str]:
+    """Item keys marked "we already have this" for that week."""
+    rows = conn.execute(
+        "SELECT item_key FROM pantry WHERE week = ?", (week_start(week).isoformat(),)
+    )
+    return {r["item_key"] for r in rows}
+
+
+def set_pantry(conn: sqlite3.Connection, week: date, item_key: str, have: bool) -> None:
+    wk = week_start(week).isoformat()
+    if have:
+        conn.execute(
+            "INSERT OR IGNORE INTO pantry (week, item_key) VALUES (?, ?)", (wk, item_key)
+        )
+    else:
+        conn.execute(
+            "DELETE FROM pantry WHERE week = ? AND item_key = ?", (wk, item_key)
+        )
+    conn.commit()

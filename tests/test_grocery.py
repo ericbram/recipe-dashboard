@@ -105,3 +105,59 @@ def test_an_unknown_aisle_name_falls_into_unsorted_rather_than_vanishing():
     items = grocery.build_list(plan(recipe("A", "beef")), {"beef": "butcher"})
     groups = grocery.group_by_aisle(items)
     assert groups == [(grocery.UNSORTED, items)]
+
+
+def staple(line):
+    return {"id": hash(line) % 10000, "line": line}
+
+
+def test_staples_join_the_proposed_list():
+    items = grocery.build_list(plan(recipe("Chili", "beef")), staples=[staple("Milk")])
+    assert [i.line for i in items] == ["beef", "Milk"]
+    milk = next(i for i in items if i.line == "Milk")
+    assert milk.sources == [grocery.STAPLE]
+    assert milk.is_staple is True
+
+
+def test_a_staple_that_is_also_an_ingredient_is_one_row_with_both_sources():
+    items = grocery.build_list(plan(recipe("Cake", "2 eggs")), staples=[staple("2 eggs")])
+    assert len(items) == 1
+    assert items[0].sources == ["Cake", grocery.STAPLE]
+    assert items[0].is_staple is True
+
+
+def test_have_marks_come_from_the_pantry_set():
+    items = grocery.build_list(
+        plan(recipe("Chili", "1 lb beef\n1 onion")),
+        have={"1 lb beef"},
+    )
+    by_line = {i.line: i.have for i in items}
+    assert by_line["1 lb beef"] is True
+    assert by_line["1 onion"] is False
+
+
+def test_to_buy_drops_what_the_kitchen_already_has():
+    items = grocery.build_list(
+        plan(recipe("Chili", "1 lb beef\n1 onion")),
+        have={"1 lb beef"},
+    )
+    assert [i.line for i in grocery.to_buy(items)] == ["1 onion"]
+
+
+def test_check_key_is_case_and_whitespace_insensitive():
+    assert grocery.check_key("  1 LB   Beef ") == "1 lb beef"
+    # Two amounts of the same thing are separate rows to tick off...
+    assert grocery.check_key("1 lb beef") != grocery.check_key("2 lb beef")
+    # ...but they still share one aisle.
+    assert grocery.sort_key("1 lb beef") == grocery.sort_key("2 lb beef")
+
+
+def test_a_have_mark_follows_the_line_not_the_recipe():
+    """Two recipes needing the same line share one tick."""
+    items = grocery.build_list(
+        plan(recipe("Chili", "1 onion, diced"), recipe("Soup", "1 onion, diced")),
+        have={"1 onion, diced"},
+    )
+    assert len(items) == 1
+    assert items[0].have is True
+    assert grocery.to_buy(items) == []

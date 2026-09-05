@@ -1,0 +1,61 @@
+<div id="kitchen">
+  {% if not items %}
+    <p class="empty">Nothing proposed yet. <a href="/plan?week={{ start.isoformat() }}">Pick some recipes</a>,
+      or add a staple below and it'll show up here every week.</p>
+  {% else %}
+    <p class="muted">{{ items | length }} proposed ·
+      <strong>{{ have_count }}</strong> already in the kitchen ·
+      <strong>{{ buy_count }}</strong> to buy
+      {% if buy_count %}· <a href="/grocery?week={{ start.isoformat() }}">Grocery list →</a>{% endif %}
+    </p>
+
+    <div class="kitchen">
+      {% for aisle, group in groups %}
+        <h2 class="aisle">{{ aisle }}</h2>
+        <ul>
+          {% for item in group %}
+            <li class="{{ 'have' if item.have }}">
+              <form method="post" action="/kitchen/have"
+                    hx-post="/kitchen/have" hx-target="#kitchen" hx-swap="outerHTML">
+                <input type="hidden" name="week" value="{{ start.isoformat() }}">
+                <input type="hidden" name="item_key" value="{{ item.line }}">
+                <input type="hidden" name="have" value="{{ '0' if item.have else '1' }}">
+                <button type="submit" class="tick" aria-pressed="{{ 'true' if item.have else 'false' }}"
+                        aria-label="{{ 'Mark ' ~ item.line ~ ' as needed' if item.have else 'Mark ' ~ item.line ~ ' as already in the kitchen' }}">
+                  {{ '✓' if item.have else '' }}
+                </button>
+              </form>
+              <span class="what">{{ item.line }}</span>
+              <span class="who {{ 'staple' if item.is_staple }}">{{ item.summary }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <details class="staples" {% if not items %}open{% endif %}>
+    <summary>Staples — always on this list ({{ staples | length }})</summary>
+    <form method="post" action="/staples/add" class="filters"
+          hx-post="/staples/add" hx-target="#kitchen" hx-swap="outerHTML">
+      <input type="hidden" name="week" value="{{ start.isoformat() }}">
+      <input name="line" placeholder="Milk, eggs, coffee…" required>
+      <button type="submit">Add staple</button>
+    </form>
+    {% if staples %}
+      <ul class="picked">
+        {% for s in staples %}
+          <li>
+            <span class="what">{{ s['line'] }}</span>
+            <form method="post" action="/staples/remove"
+                  hx-post="/staples/remove" hx-target="#kitchen" hx-swap="outerHTML">
+              <input type="hidden" name="week" value="{{ start.isoformat() }}">
+              <input type="hidden" name="staple_id" value="{{ s['id'] }}">
+              <button type="submit" class="remove" aria-label="Remove {{ s['line'] }} from staples">✕</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </details>
+</div>
