@@ -34,7 +34,7 @@
           <li>
             <label>
               <input type="checkbox" value="{{ item.line }}">
-              <span class="what">{{ item.line }}</span>
+              <span class="what">{{ item.line }}{% if item.is_stack %}<span class="parts-of">{{ item.parts | join(' · ') }}</span>{% endif %}</span>
               <span class="who {{ 'shared' if item.shared }}">{{ item.summary }}</span>
             </label>
           </li>

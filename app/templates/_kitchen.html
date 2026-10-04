@@ -25,7 +25,7 @@
                   {{ '✓' if item.have else '' }}
                 </button>
               </form>
-              <span class="what">{{ item.line }}</span>
+              <span class="what">{{ item.line }}{% if item.is_stack %}<span class="parts-of">{{ item.parts | join(' · ') }}</span>{% endif %}</span>
               <span class="who {{ 'staple' if item.is_staple }}">{{ item.summary }}</span>
             </li>
           {% endfor %}

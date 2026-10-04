@@ -1,0 +1,47 @@
+<div id="group" data-week="{{ start.isoformat() }}">
+  {% if not items %}
+    <p class="empty">Nothing proposed yet. <a href="/plan?week={{ start.isoformat() }}">Pick some recipes</a> first.</p>
+  {% else %}
+    <ul class="stackable">
+      {% for item in items %}
+        <li class="{{ 'stack' if item.is_stack }}" data-keys="{{ item.part_keys }}" data-name="{{ item.line }}">
+          {% if item.is_stack %}
+            <details>
+              <summary draggable="true">
+                <span class="what">{{ item.line }}</span>
+                <span class="count" aria-label="{{ item.parts | length }} lines">{{ item.parts | length }}</span>
+              </summary>
+              <form method="post" action="/group/rename" class="filters"
+                    hx-post="/group/rename" hx-target="#group" hx-swap="outerHTML">
+                <input type="hidden" name="week" value="{{ start.isoformat() }}">
+                <input type="hidden" name="old" value="{{ item.line }}">
+                <input name="name" value="{{ item.line }}" aria-label="Stack name" required>
+                <button type="submit">Rename</button>
+              </form>
+              <ul class="parts">
+                {% for part in item.parts %}
+                  <li>
+                    <span class="what">{{ part }}</span>
+                    <form method="post" action="/group/unstack"
+                          hx-post="/group/unstack" hx-target="#group" hx-swap="outerHTML">
+                      <input type="hidden" name="week" value="{{ start.isoformat() }}">
+                      <input type="hidden" name="item_key" value="{{ part }}">
+                      <button type="submit" class="remove" aria-label="Take {{ part }} out of the stack">✕</button>
+                    </form>
+                  </li>
+                {% endfor %}
+              </ul>
+            </details>
+          {% else %}
+            <div class="tile" draggable="true">
+              <span class="what">{{ item.line }}</span>
+              <span class="who">{{ item.summary }}</span>
+            </div>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+    <p class="muted">{{ items | length }} item{{ '' if items | length == 1 else 's' }} ·
+      <a href="/kitchen?week={{ start.isoformat() }}">Check the kitchen →</a></p>
+  {% endif %}
+</div>

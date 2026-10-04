@@ -10,6 +10,7 @@ wrong is worse at the store than one that shows you both lines.
 
 import re
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass, field
 
 # Leading amounts and their units say nothing about *what* the ingredient is,
@@ -57,10 +58,23 @@ class Item:
     aisle: str = UNSORTED
     #: True when this week's kitchen check says we already have it.
     have: bool = False
+    #: The recipe lines behind this row: just [line], or every line the
+    #: grouping step stacked under this name.
+    parts: list[str] = field(default_factory=list)
 
     @property
     def check_id(self) -> str:
         return check_key(self.line)
+
+    @property
+    def is_stack(self) -> bool:
+        return len(self.parts) > 1
+
+    @property
+    def part_keys(self) -> str:
+        """Newline-joined check keys of the parts — what a drag carries.
+        Newlines are safe: every line came out of splitlines()."""
+        return "\n".join(check_key(p) for p in self.parts)
 
     @property
     def is_staple(self) -> bool:
@@ -95,7 +109,7 @@ def sort_key(line: str) -> str:
     return " ".join(words) or line.lower().strip()
 
 
-def build_list(planned, known_aisles=None, staples=(), have=()) -> list[Item]:
+def build_list(planned, known_aisles=None, staples=(), have=(), stacks=None) -> list[Item]:
     """Everything the week proposes: the shortlisted recipes' ingredients plus
     the always-check staples.
 
@@ -103,6 +117,7 @@ def build_list(planned, known_aisles=None, staples=(), have=()) -> list[Item]:
     - `known_aisles`  db.get_aisles(); anything missing stays UNSORTED
     - `staples`  db.get_staples() rows, folded in as their own source
     - `have`  db.get_pantry(); item keys already in the kitchen
+    - `stacks`  db.get_stacks(); lines the grouping step merged into one row
 
     Returns the whole proposed list — filter with `to_buy` for the shopping
     list, so the kitchen check can still show what was ticked off.
@@ -118,11 +133,7 @@ def build_list(planned, known_aisles=None, staples=(), have=()) -> list[Item]:
         cid = check_key(line)
         if cid not in items:
             key = sort_key(line)
-            items[cid] = Item(
-                line=line, key=key,
-                aisle=known_aisles.get(key, UNSORTED),
-                have=cid in have,
-            )
+            items[cid] = Item(line=line, key=key, aisle=known_aisles.get(key, UNSORTED))
         if source not in items[cid].sources:
             items[cid].sources.append(source)
 
@@ -134,7 +145,32 @@ def build_list(planned, known_aisles=None, staples=(), have=()) -> list[Item]:
     for staple in staples:
         add(staple["line"], STAPLE)
 
-    return sorted(items.values(), key=lambda i: (i.key, i.line.lower()))
+    merged = _stack(sorted(items.values(), key=lambda i: (i.key, i.line.lower())), stacks or {})
+    for item in merged:
+        item.have = item.check_id in have
+    return sorted(merged, key=lambda i: (i.key, i.line.lower()))
+
+
+def _stack(items, stacks) -> list[Item]:
+    """Fold stacked lines into one row named after the stack.
+
+    A stack only counts with two of its lines on this week's list — if
+    dropping a recipe leaves one behind, that line is just itself again. The
+    row takes its aisle and sort position from its first line, since that is
+    what the learned aisle map knows about.
+    """
+    size = Counter(stacks[i.check_id] for i in items if i.check_id in stacks)
+    out: dict[str, Item] = {}
+    for item in items:
+        name = stacks.get(item.check_id)
+        line = name if size[name] > 1 else item.line
+        cid = check_key(line)
+        if cid not in out:
+            out[cid] = Item(line=line, key=item.key, aisle=item.aisle)
+        row = out[cid]
+        row.parts.append(item.line)
+        row.sources += [s for s in item.sources if s not in row.sources]
+    return list(out.values())
 
 
 def to_buy(items) -> list[Item]:

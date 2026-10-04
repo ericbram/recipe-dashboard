@@ -82,5 +82,27 @@ button.chip { font:inherit; cursor:pointer; }
 .field input, .field textarea { width:100%; }
 @media (prefers-color-scheme: dark) {
   :root { --bg:#1b1a18; --fg:#ece8e2; --muted:#9a938c; --line:#35322e; --accent:#e0813f; }
-  input, select, textarea, button, .card, .picked li, .chip { background:#232120; }
+  input, select, textarea, button, .card, .picked li, .chip, .stackable > li { background:#232120; }
 }
+.stackable { list-style:none; padding:0; margin:1rem 0; display:grid; gap:.5rem; }
+.stackable > li { background:#fff; border:1px solid var(--line); border-radius:8px; }
+.stackable .tile, .stackable summary { display:flex; align-items:center; gap:.75rem;
+  padding:.6rem 1rem; cursor:grab; }
+.stackable .what { flex:1; }
+.stackable .who { font-size:.8rem; color:var(--muted); text-align:right; }
+.stackable li.stack { box-shadow:3px 3px 0 -1px var(--bg), 3px 3px 0 0 var(--line); }
+.stackable summary { list-style:none; font-weight:600; }
+.stackable summary::-webkit-details-marker { display:none; }
+.stackable .count { font-size:.8rem; color:#fff; background:var(--accent);
+  border-radius:999px; padding:0 .5rem; }
+.stackable details form.filters { margin:0 1rem .5rem; }
+.stackable details form.filters input[name=name] { flex:1; }
+.stackable .parts { list-style:none; padding:0 1rem .5rem; margin:0; }
+.stackable .parts li { display:flex; align-items:center; gap:.5rem; font-size:.9rem;
+  color:var(--muted); border-top:1px solid var(--line); padding:.3rem 0; }
+.stackable .parts form { margin:0; }
+.stackable .remove { background:none; border:0; color:var(--muted); cursor:pointer; padding:.15rem .4rem; }
+.stackable .remove:hover { color:#a11; }
+.stackable li.dragging { opacity:.4; }
+.stackable li.drop { border-color:var(--accent); outline:2px dashed var(--accent); }
+.parts-of { display:block; font-size:.8rem; color:var(--muted); }

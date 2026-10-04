@@ -612,3 +612,25 @@ def test_ticking_an_item_does_not_force_the_panel_open(client):
         "week": "2026-09-01", "item_key": "1 lb ground beef", "have": "1"},
         headers={"HX-Request": "true"})
     assert '<details class="staples" open>' not in resp.text
+
+
+def test_group_stack_rename_and_unstack_flow_through_to_the_grocery_list(client):
+    _stock_the_week(client)
+    hx = {"HX-Request": "true"}
+    resp = client.post("/group/stack", headers=hx, data={
+        "week": "2026-09-01", "keys": "4 cups stock", "onto": "1 onion, diced",
+        "name": "1 onion, diced"})
+    assert resp.status_code == 200 and "<html" not in resp.text.lower()
+
+    client.post("/group/rename", headers=hx, data={
+        "week": "2026-09-01", "old": "1 onion, diced", "name": "Soup base"})
+    page = client.get("/grocery?week=2026-09-01").text
+    assert "Soup base" in page and "1 onion, diced · 4 cups stock" in page
+
+    client.post("/group/unstack", headers=hx, data={"week": "2026-09-01", "item_key": "4 cups stock"})
+    assert "Soup base" not in client.get("/grocery?week=2026-09-01").text
+
+
+def test_group_stack_needs_both_ends(client):
+    resp = client.post("/group/stack", data={"week": "2026-09-01", "keys": "", "onto": "x", "name": "x"})
+    assert resp.status_code == 400

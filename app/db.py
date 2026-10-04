@@ -45,6 +45,16 @@ CREATE TABLE IF NOT EXISTS staples (
 -- "We already have this, do not buy it." One row per item marked in the
 -- kitchen check; absence means it still needs buying. Keyed per week so last
 -- week's answers do not silently carry over.
+-- The grouping step: lines stacked together to shop for as one item, named
+-- `name`. One row per stacked line, keyed per week like the pantry. A stack
+-- is just the rows sharing a name, so renaming is one UPDATE.
+CREATE TABLE IF NOT EXISTS stacks (
+  week     TEXT NOT NULL,
+  item_key TEXT NOT NULL,
+  name     TEXT NOT NULL,
+  PRIMARY KEY (week, item_key)
+);
+
 CREATE TABLE IF NOT EXISTS pantry (
   week     TEXT NOT NULL,
   item_key TEXT NOT NULL,
@@ -273,3 +283,42 @@ def set_pantry(conn: psycopg.Connection, week: date, item_key: str, have: bool) 
         conn.execute(
             "DELETE FROM pantry WHERE week = %s AND item_key = %s", (wk, item_key)
         )
+
+
+def get_stacks(conn: psycopg.Connection, week: date) -> dict[str, str]:
+    """Item key -> stack name for that week."""
+    rows = conn.execute(
+        "SELECT item_key, name FROM stacks WHERE week = %s", (week_start(week).isoformat(),)
+    )
+    return {r["item_key"]: r["name"] for r in rows}
+
+
+def stack_items(conn: psycopg.Connection, week: date, keys, name: str) -> None:
+    """Put every key into the stack called `name`, moving it out of any other."""
+    name = " ".join((name or "").split())
+    if not name:
+        raise ValueError("a stack needs a name")
+    wk = week_start(week).isoformat()
+    conn.cursor().executemany(
+        "INSERT INTO stacks (week, item_key, name) VALUES (%s, %s, %s) "
+        "ON CONFLICT (week, item_key) DO UPDATE SET name = excluded.name",
+        [(wk, k, name) for k in keys if k],
+    )
+
+
+def rename_stack(conn: psycopg.Connection, week: date, old: str, new: str) -> None:
+    """Renaming onto another stack's name merges the two — same name, same stack."""
+    new = " ".join((new or "").split())
+    if not new:
+        raise ValueError("a stack needs a name")
+    conn.execute(
+        "UPDATE stacks SET name = %s WHERE week = %s AND name = %s",
+        (new, week_start(week).isoformat(), old),
+    )
+
+
+def unstack(conn: psycopg.Connection, week: date, item_key: str) -> None:
+    conn.execute(
+        "DELETE FROM stacks WHERE week = %s AND item_key = %s",
+        (week_start(week).isoformat(), item_key),
+    )

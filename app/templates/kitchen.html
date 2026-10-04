@@ -4,7 +4,7 @@
 <h1>What's in the kitchen</h1>
 <p class="muted">Week of {{ start.strftime('%B %-d') }} · tick anything you already have, and it drops off the shopping list.</p>
 <p class="chips">
-  <a class="chip" href="/plan?week={{ start.isoformat() }}">← This week's recipes</a>
+  <a class="chip" href="/group?week={{ start.isoformat() }}">← Group the list</a>
   <a class="chip" href="/kitchen?week={{ prev.isoformat() }}">← Prev</a>
   <a class="chip" href="/kitchen?week={{ next.isoformat() }}">Next →</a>
   <a class="chip" href="/grocery?week={{ start.isoformat() }}">Grocery list</a>

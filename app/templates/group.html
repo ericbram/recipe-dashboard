@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Group the list{% endblock %}
+{% block content %}
+<h1>Group the list</h1>
+<p class="muted">Week of {{ start.strftime('%B %-d') }} · drag a line onto another to shop for them as one item. Click a stack to rename it.</p>
+<p class="chips">
+  <a class="chip" href="/plan?week={{ start.isoformat() }}">← This week's recipes</a>
+  <a class="chip" href="/group?week={{ prev.isoformat() }}">← Prev</a>
+  <a class="chip" href="/group?week={{ next.isoformat() }}">Next →</a>
+  <a class="chip" href="/kitchen?week={{ start.isoformat() }}">Kitchen check →</a>
+</p>
+{% include "_group.html" %}
+
+<script>
+  // Native HTML5 drag and drop. Listeners sit on the document, so they keep
+  // working after htmx swaps #group out.
+  (function () {
+    var dragged = null;
+    function tile(e) { return e.target.closest && e.target.closest('#group li[data-keys]'); }
+
+    document.addEventListener('dragstart', function (e) {
+      dragged = tile(e);
+      if (!dragged) return;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', dragged.dataset.name);
+      dragged.classList.add('dragging');
+    });
+    document.addEventListener('dragend', function () {
+      if (dragged) dragged.classList.remove('dragging');
+      dragged = null;
+      document.querySelectorAll('#group .drop').forEach(function (el) { el.classList.remove('drop'); });
+    });
+    document.addEventListener('dragover', function (e) {
+      var t = tile(e);
+      if (!dragged || !t || t === dragged) return;
+      e.preventDefault();
+      t.classList.add('drop');
+    });
+    document.addEventListener('dragleave', function (e) {
+      var t = tile(e);
+      if (t && !t.contains(e.relatedTarget)) t.classList.remove('drop');
+    });
+    document.addEventListener('drop', function (e) {
+      var t = tile(e);
+      if (!dragged || !t || t === dragged) return;
+      e.preventDefault();
+      var group = document.getElementById('group');
+      htmx.ajax('POST', '/group/stack', {
+        target: '#group', swap: 'outerHTML',
+        values: { week: group.dataset.week, keys: dragged.dataset.keys,
+                  onto: t.dataset.keys.split('\n')[0], name: t.dataset.name },
+      });
+    });
+  })();
+</script>
+{% endblock %}

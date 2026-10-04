@@ -283,6 +283,7 @@ def _week_items(conn, week: str, staples=None):
         known_aisles=db.get_aisles(conn),
         staples=db.get_staples(conn) if staples is None else staples,
         have=db.get_pantry(conn, start),
+        stacks=db.get_stacks(conn, start),
     )
     return start, planned, items
 
@@ -303,6 +304,67 @@ def _kitchen_ctx(conn, start: date, staples_open: bool = False) -> dict:
         # Keep the panel open across a swap when the swap came from using it.
         "staples_open": staples_open,
     }
+
+
+def _group_ctx(conn, start: date) -> dict:
+    _, planned, items = _week_items(conn, start.isoformat())
+    return {
+        "items": items,
+        "recipes": planned,
+        "start": start,
+        "prev": start - timedelta(days=7),
+        "next": start + timedelta(days=7),
+    }
+
+
+@app.get("/group", response_class=HTMLResponse)
+def group_items(request: Request, week: str = "", conn=Depends(get_db)):
+    """The step between planning and the kitchen check: stack lines that are
+    really one purchase ("1 onion" + "1/2 red onion") into a single row."""
+    start = db.week_start(_parse_date(week) if week else date.today())
+    return templates.TemplateResponse(request, "group.html", _group_ctx(conn, start))
+
+
+def _group_reply(request: Request, conn, start: date):
+    if not request.headers.get("HX-Request"):
+        return RedirectResponse(f"/group?week={start.isoformat()}", status_code=303)
+    return templates.TemplateResponse(request, "_group.html", _group_ctx(conn, start))
+
+
+@app.post("/group/stack", response_class=HTMLResponse)
+def group_stack(request: Request, week: str = Form(""), keys: str = Form(""),
+                onto: str = Form(""), name: str = Form(""), conn=Depends(get_db)):
+    """Drop one row (a line or a whole stack) onto another. Everything joins
+    the target, under the target's name."""
+    start = db.week_start(_parse_date(week) if week else date.today())
+    moved = {grocery.check_key(k) for k in keys.split("\n")} - {""}
+    target = grocery.check_key(onto)
+    if not moved or not target:
+        raise HTTPException(status_code=400, detail="Drop what onto what?")
+    try:
+        db.stack_items(conn, start, [*moved, target], name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _group_reply(request, conn, start)
+
+
+@app.post("/group/rename", response_class=HTMLResponse)
+def group_rename(request: Request, week: str = Form(""), old: str = Form(""),
+                 name: str = Form(""), conn=Depends(get_db)):
+    start = db.week_start(_parse_date(week) if week else date.today())
+    try:
+        db.rename_stack(conn, start, old, name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _group_reply(request, conn, start)
+
+
+@app.post("/group/unstack", response_class=HTMLResponse)
+def group_unstack(request: Request, week: str = Form(""), item_key: str = Form(""),
+                  conn=Depends(get_db)):
+    start = db.week_start(_parse_date(week) if week else date.today())
+    db.unstack(conn, start, grocery.check_key(item_key))
+    return _group_reply(request, conn, start)
 
 
 @app.get("/kitchen", response_class=HTMLResponse)

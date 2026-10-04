@@ -173,3 +173,17 @@ def test_folding_does_not_swallow_the_whole_line():
     """A line that is only non-ASCII must still get a usable key."""
     assert grocery.sort_key("½ cup sugar") == "sugar"
     assert grocery.sort_key("米") == "米"     # falls back to the line itself
+
+
+def test_stacked_lines_become_one_row_and_a_lone_leftover_is_itself_again():
+    week = plan(recipe("Chili", "1 onion, diced\n1 lb beef"), recipe("Tacos", "1/2 red onion"))
+    stacks = {"1 onion, diced": "Onions", "1/2 red onion": "Onions", "gone": "Onions"}
+    items = grocery.build_list(week, stacks=stacks, have={"onions"})
+    onions = next(i for i in items if i.line == "Onions")
+    assert onions.parts == ["1 onion, diced", "1/2 red onion"]
+    assert onions.sources == ["Chili", "Tacos"] and onions.have
+    assert len(items) == 2
+
+    # Tacos dropped from the week: one stacked line left is not a stack.
+    items = grocery.build_list(week[:1], stacks=stacks)
+    assert [i.line for i in items] == ["1 lb beef", "1 onion, diced"]
