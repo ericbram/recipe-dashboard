@@ -168,10 +168,12 @@ def test_set_rating_rejects_out_of_range(conn, bad):
         db.set_rating(conn, rid, bad)
 
 
-def test_week_start_returns_monday():
-    assert db.week_start(date(2026, 9, 3)) == date(2026, 8, 31)   # Thursday -> Monday
-    assert db.week_start(date(2026, 8, 31)) == date(2026, 8, 31)  # Monday -> itself
-    assert db.week_start(date(2026, 9, 6)) == date(2026, 8, 31)   # Sunday -> Monday
+def test_week_start_returns_saturday():
+    assert db.week_start(date(2026, 9, 3)) == date(2026, 8, 29)   # Thursday -> Saturday
+    assert db.week_start(date(2026, 8, 29)) == date(2026, 8, 29)  # Saturday -> itself
+    assert db.week_start(date(2026, 9, 4)) == date(2026, 8, 29)   # Friday ends the week
+    assert db.week_start(date(2026, 9, 5)) == date(2026, 9, 5)    # next Saturday starts a new one
+    assert db.week_start(date(2026, 8, 30)) == date(2026, 8, 29)  # Sunday -> Saturday
 
 
 def test_a_new_week_is_empty(conn):
@@ -183,15 +185,15 @@ def test_add_and_read_the_week(conn):
     b = db.create_recipe(conn, "Chili")
     db.add_to_plan(conn, date(2026, 9, 2), a)
     db.add_to_plan(conn, date(2026, 9, 4), b)
-    # Any day in the week resolves to the same Monday-keyed list, alphabetical.
+    # Any day in the week resolves to the same Saturday-keyed list, alphabetical.
     assert [r["title"] for r in db.get_plan(conn, date(2026, 8, 31))] == ["Chili", "Stew"]
-    assert [r["title"] for r in db.get_plan(conn, date(2026, 9, 6))] == ["Chili", "Stew"]
+    assert [r["title"] for r in db.get_plan(conn, date(2026, 9, 4))] == ["Chili", "Stew"]
 
 
 def test_adding_the_same_recipe_twice_is_a_no_op(conn):
     rid = db.create_recipe(conn, "Chili")
     db.add_to_plan(conn, date(2026, 9, 2), rid)
-    db.add_to_plan(conn, date(2026, 9, 5), rid)
+    db.add_to_plan(conn, date(2026, 9, 4), rid)
     assert len(db.get_plan(conn, date(2026, 8, 31))) == 1
 
 
@@ -200,7 +202,7 @@ def test_remove_takes_it_off_the_week(conn):
     b = db.create_recipe(conn, "Stew")
     db.add_to_plan(conn, date(2026, 9, 2), a)
     db.add_to_plan(conn, date(2026, 9, 2), b)
-    db.remove_from_plan(conn, date(2026, 9, 6), a)
+    db.remove_from_plan(conn, date(2026, 9, 4), a)
     assert [r["title"] for r in db.get_plan(conn, date(2026, 8, 31))] == ["Stew"]
 
 

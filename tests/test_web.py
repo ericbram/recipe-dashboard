@@ -277,7 +277,7 @@ def test_add_without_hx_header_redirects_to_the_week(client):
     resp = client.post("/plan/add", data={"week": "2026-09-02", "recipe_id": str(rid)},
                        follow_redirects=False)
     assert resp.status_code == 303
-    assert resp.headers["location"] == "/plan?week=2026-08-31"
+    assert resp.headers["location"] == "/plan?week=2026-08-29"
 
 
 def test_non_numeric_recipe_id_is_400(client):
@@ -423,13 +423,13 @@ def test_grocery_page_rejects_a_bad_week(client):
 
 def test_plan_page_links_to_the_grocery_list(client):
     resp = client.get("/plan?week=2026-09-01")
-    assert '/grocery?week=2026-08-31' in resp.text
+    assert '/grocery?week=2026-08-29' in resp.text
 
 
 def test_grocery_api_reports_what_needs_sorting(client):
     _stock_the_week(client)
     body = client.get("/api/grocery?week=2026-09-01").json()
-    assert body["week_start"] == "2026-08-31"
+    assert body["week_start"] == "2026-08-29"
     assert "meat" in body["aisles"]
     assert sorted(body["unsorted_keys"]) == ["ground beef", "onion diced", "stock"]
     beef = next(i for i in body["items"] if i["line"] == "1 lb ground beef")
@@ -536,7 +536,7 @@ def test_kitchen_toggle_without_hx_redirects(client):
         "week": "2026-09-01", "item_key": "1 lb ground beef", "have": "1"},
         follow_redirects=False)
     assert resp.status_code == 303
-    assert resp.headers["location"] == "/kitchen?week=2026-08-31"
+    assert resp.headers["location"] == "/kitchen?week=2026-08-29"
 
 
 def test_api_grocery_reports_the_have_flag(client):

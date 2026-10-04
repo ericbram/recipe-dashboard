@@ -13,9 +13,9 @@ CREATE TABLE pantry (week TEXT NOT NULL, item_key TEXT NOT NULL);
 CREATE TABLE aisles (key TEXT PRIMARY KEY, aisle TEXT NOT NULL);
 INSERT INTO recipes (id, title, rating, created_at) VALUES (7, 'Chili', 4, '2026-09-01T10:00:00');
 INSERT INTO recipe_tags VALUES (7, 'dinner');
-INSERT INTO plan VALUES ('2026-08-31', 7);
+INSERT INTO plan VALUES ('2026-08-29', 7);
 INSERT INTO staples VALUES (3, 'Milk');
-INSERT INTO pantry VALUES ('2026-08-31', 'milk');
+INSERT INTO pantry VALUES ('2026-08-29', 'milk');
 INSERT INTO aisles VALUES ('beef', 'Meat');
 """
 
@@ -30,7 +30,7 @@ def test_rows_land_with_their_ids_and_relations(conn):
     migrate_sqlite.migrate(_legacy(), conn)
     assert db.get_recipe(conn, 7)["rating"] == 4
     assert db.get_tags(conn, 7) == ["dinner"]
-    assert [r["title"] for r in db.get_plan(conn, db.date(2026, 8, 31))] == ["Chili"]
+    assert [r["title"] for r in db.get_plan(conn, db.date(2026, 8, 29))] == ["Chili"]
     assert [s["line"] for s in db.get_staples(conn)] == ["Milk"]
     assert db.get_aisles(conn) == {"beef": "Meat"}
 

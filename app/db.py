@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS recipe_tags (
 );
 
 -- A week's shortlist: which recipes we intend to cook, with no day attached.
--- `week` is the ISO date of that week's Monday.
+-- `week` is the ISO date of that week's Saturday; weeks run Saturday to Friday.
 CREATE TABLE IF NOT EXISTS plan (
   week      TEXT NOT NULL,
   recipe_id INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
@@ -195,7 +195,7 @@ def set_rating(conn: psycopg.Connection, recipe_id: int, rating: int | None) -> 
 
 
 def week_start(d: date) -> date:
-    return d - timedelta(days=d.weekday())
+    return d - timedelta(days=(d.weekday() - 5) % 7)
 
 
 def get_plan(conn: psycopg.Connection, week: date) -> list[dict]:
