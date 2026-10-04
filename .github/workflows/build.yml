@@ -41,3 +41,26 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # pi-stack is the Pi's desired state; pointing it at this build is the deploy.
+  # Needs PI_STACK_DEPLOY_KEY: a write deploy key on ericbram/pi-stack.
+  deploy:
+    needs: image
+    runs-on: ubuntu-latest
+    concurrency: pi-stack-deploy
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: ericbram/pi-stack
+          ssh-key: ${{ secrets.PI_STACK_DEPLOY_KEY }}
+
+      - name: Point pi-stack at this build
+        run: |
+          tag="sha-${GITHUB_SHA::7}"
+          sed -E -i "s#(ghcr.io/ericbram/recipe-dashboard:)[^[:space:]]+#\1${tag}#" compose.yml
+          git diff --quiet && { echo "already on $tag"; exit 0; }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898289+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "recipes: $tag"
+          # Someone may have pushed to pi-stack meanwhile; rebase once and retry.
+          git push || { git pull --rebase -q && git push; }
