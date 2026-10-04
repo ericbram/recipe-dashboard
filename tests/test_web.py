@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from datetime import date
 
 import pytest
@@ -7,19 +8,15 @@ from app import db, main
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    # Point the startup hook at a throwaway file so the suite never touches
-    # the real ./recipes.db, then override the dependency to share one
-    # connection between the test body and the app.
-    monkeypatch.setattr(main, "DB_PATH", str(tmp_path / "startup.db"))
-    conn = db.connect(str(tmp_path / "web.db"))
-    db.init_schema(conn)
+def client(conn, monkeypatch):
+    # Share the test connection with the app. nullcontext because the app
+    # opens connections in a `with` block, which would otherwise close it.
+    monkeypatch.setattr(db, "connect", lambda: nullcontext(conn))
     main.app.dependency_overrides[main.get_db] = lambda: conn
     with TestClient(main.app) as c:
         c.conn = conn
         yield c
     main.app.dependency_overrides.clear()
-    conn.close()
 
 
 def test_index_is_empty_at_first(client):

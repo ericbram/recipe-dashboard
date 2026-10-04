@@ -1,4 +1,3 @@
-import sqlite3
 from datetime import date, timedelta
 
 import pytest
@@ -6,18 +5,10 @@ import pytest
 from app import db
 
 
-@pytest.fixture
-def conn(tmp_path):
-    c = db.connect(str(tmp_path / "test.db"))
-    db.init_schema(c)
-    yield c
-    c.close()
-
-
 def test_schema_creates_three_tables(conn):
     names = {
         row["name"]
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        for row in conn.execute("SELECT table_name AS name FROM information_schema.tables WHERE table_schema = current_schema()")
     }
     assert {"recipes", "recipe_tags", "plan"} <= names
 
@@ -37,11 +28,9 @@ def test_foreign_keys_cascade(conn):
     assert conn.execute("SELECT COUNT(*) c FROM plan").fetchone()["c"] == 0
 
 
-def test_init_schema_is_idempotent(tmp_path):
-    c = db.connect(str(tmp_path / "twice.db"))
-    db.init_schema(c)
-    db.init_schema(c)
-    c.close()
+def test_init_schema_is_idempotent(conn):
+    db.init_schema(conn)
+    db.init_schema(conn)
 
 
 def test_create_and_get_recipe(conn):
@@ -91,7 +80,7 @@ def test_update_replaces_fields_and_tags(conn):
 
 def test_update_preserves_rating(conn):
     rid = db.create_recipe(conn, "Soup")
-    conn.execute("UPDATE recipes SET rating = 4 WHERE id = ?", (rid,))
+    conn.execute("UPDATE recipes SET rating = 4 WHERE id = %s", (rid,))
     db.update_recipe(
         conn, rid, title="Soup", ingredients="", steps="", notes="",
         source_url=None, tags=[],
@@ -234,66 +223,6 @@ def test_deleting_recipe_clears_it_from_plan(conn):
     assert db.get_plan(conn, date(2026, 8, 31)) == []
 
 
-OLD_PLAN_SCHEMA = """
-CREATE TABLE recipes (
-  id INTEGER PRIMARY KEY, title TEXT NOT NULL, source_url TEXT,
-  ingredients TEXT NOT NULL DEFAULT '', steps TEXT NOT NULL DEFAULT '',
-  rating INTEGER, notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
-CREATE TABLE plan (
-  date TEXT PRIMARY KEY,
-  recipe_id INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE);
-"""
-
-
-def _old_style_db(tmp_path, rows):
-    c = db.connect(str(tmp_path / "old.db"))
-    c.executescript(OLD_PLAN_SCHEMA)
-    for i, (day, title) in enumerate(rows, start=1):
-        c.execute("INSERT INTO recipes (id,title,created_at) VALUES (?,?,'2026-09-01')", (i, title))
-        c.execute("INSERT INTO plan (date, recipe_id) VALUES (?, ?)", (day, i))
-    c.commit()
-    return c
-
-
-def test_migration_folds_daily_rows_onto_their_week(tmp_path):
-    c = _old_style_db(tmp_path, [("2026-08-31", "Chili"), ("2026-09-04", "Stew")])
-    db.init_schema(c)
-    assert [r["title"] for r in db.get_plan(c, date(2026, 9, 2))] == ["Chili", "Stew"]
-    cols = {r["name"] for r in c.execute("PRAGMA table_info(plan)")}
-    assert cols == {"week", "recipe_id"}
-    assert c.execute(
-        "SELECT COUNT(*) c FROM sqlite_master WHERE name='plan_by_day'").fetchone()["c"] == 0
-    c.close()
-
-
-def test_migration_collapses_a_recipe_cooked_on_two_days(tmp_path):
-    c = db.connect(str(tmp_path / "dupe.db"))
-    c.executescript(OLD_PLAN_SCHEMA)
-    c.execute("INSERT INTO recipes (id,title,created_at) VALUES (1,'Chili','2026-09-01')")
-    c.execute("INSERT INTO plan (date, recipe_id) VALUES ('2026-08-31', 1)")
-    c.execute("INSERT INTO plan (date, recipe_id) VALUES ('2026-09-03', 1)")
-    c.commit()
-    db.init_schema(c)
-    assert [r["title"] for r in db.get_plan(c, date(2026, 8, 31))] == ["Chili"]
-    c.close()
-
-
-def test_migration_splits_rows_across_different_weeks(tmp_path):
-    c = _old_style_db(tmp_path, [("2026-08-31", "Chili"), ("2026-09-08", "Stew")])
-    db.init_schema(c)
-    assert [r["title"] for r in db.get_plan(c, date(2026, 8, 31))] == ["Chili"]
-    assert [r["title"] for r in db.get_plan(c, date(2026, 9, 7))] == ["Stew"]
-    c.close()
-
-
-def test_migration_is_idempotent(tmp_path):
-    c = _old_style_db(tmp_path, [("2026-09-02", "Chili")])
-    db.init_schema(c)
-    db.init_schema(c)
-    assert [r["title"] for r in db.get_plan(c, date(2026, 8, 31))] == ["Chili"]
-    c.close()
-
-
 def test_staples_round_trip_and_dedupe(conn):
     db.add_staple(conn, "Milk")
     db.add_staple(conn, "  Milk  ")          # same thing, normalized
@@ -329,39 +258,3 @@ def test_marking_twice_is_a_no_op(conn):
     for _ in range(2):
         db.set_pantry(conn, date(2026, 9, 2), "1 lb beef", have=True)
     assert db.get_pantry(conn, date(2026, 8, 31)) == {"1 lb beef"}
-
-
-def _interrupted_migration(tmp_path):
-    """A database left mid-migration: renamed, new table made, copy never ran."""
-    c = db.connect(str(tmp_path / "crash.db"))
-    c.executescript(OLD_PLAN_SCHEMA)
-    c.execute("INSERT INTO recipes (id,title,created_at) VALUES (1,'Chili','2026-09-01')")
-    c.execute("INSERT INTO recipes (id,title,created_at) VALUES (2,'Stew','2026-09-01')")
-    c.execute("INSERT INTO plan (date,recipe_id) VALUES ('2026-09-02',1)")
-    c.execute("INSERT INTO plan (date,recipe_id) VALUES ('2026-09-04',2)")
-    c.commit()
-    c.execute("ALTER TABLE plan RENAME TO plan_by_day")
-    c.executescript(db.SCHEMA)   # implicit COMMIT — the rename is now durable
-    return c
-
-
-def test_an_interrupted_migration_is_finished_on_the_next_start(tmp_path):
-    """executescript commits, so the rename and the copy cannot share a
-    transaction. A surviving plan_by_day must mean 'resume', not 'done'."""
-    c = _interrupted_migration(tmp_path)
-    assert db.get_plan(c, date(2026, 8, 31)) == [], "precondition: the copy never ran"
-
-    db.init_schema(c)   # restart
-
-    assert [r["title"] for r in db.get_plan(c, date(2026, 8, 31))] == ["Chili", "Stew"]
-    left = {r["name"] for r in c.execute("SELECT name FROM sqlite_master WHERE name='plan_by_day'")}
-    assert left == set(), "the old table must be dropped once the rows are safe"
-    c.close()
-
-
-def test_resuming_twice_does_not_duplicate(tmp_path):
-    c = _interrupted_migration(tmp_path)
-    db.init_schema(c)
-    db.init_schema(c)
-    assert len(db.get_plan(c, date(2026, 8, 31))) == 2
-    c.close()

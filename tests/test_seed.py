@@ -5,14 +5,6 @@ import pytest
 from app import db, seed
 
 
-@pytest.fixture
-def conn(tmp_path):
-    c = db.connect(str(tmp_path / "seed.db"))
-    db.init_schema(c)
-    yield c
-    c.close()
-
-
 def write(tmp_path, entries):
     path = tmp_path / "seed.json"
     path.write_text(json.dumps(entries))

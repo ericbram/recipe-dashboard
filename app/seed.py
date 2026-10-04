@@ -4,12 +4,11 @@ Idempotent by title: recipes already in the library are left alone, so running
 this twice is safe and re-running after adding entries to the seed file only
 adds the new ones.
 
-    python -m app.seed            # into $DB_PATH, default ./recipes.db
+    python -m app.seed            # into the PG* database
     python -m app.seed --dry-run  # say what it would do
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -48,8 +47,7 @@ def seed(conn, path: Path = SEED_FILE, dry_run: bool = False) -> tuple[int, int,
 
 def main(argv: list[str]) -> int:
     dry_run = "--dry-run" in argv
-    db_path = os.environ.get("DB_PATH", "./recipes.db")
-    conn = db.connect(db_path)
+    conn = db.connect()
     db.init_schema(conn)
     try:
         added, skipped, rejected = seed(conn, dry_run=dry_run)
@@ -57,7 +55,7 @@ def main(argv: list[str]) -> int:
         conn.close()
 
     verb = "would add" if dry_run else "added"
-    print(f"{verb} {added}, skipped {skipped} already present -> {db_path}")
+    print(f"{verb} {added}, skipped {skipped} already present")
     for title in rejected:
         print(f"  rejected (no usable title): {title}", file=sys.stderr)
     return 1 if rejected else 0

@@ -6,25 +6,34 @@ dinner plan. Self-hosted, no accounts, no cloud.
 ## Run it
 
 ```bash
-docker compose up -d          # http://localhost:8000
+docker compose up -d --wait   # http://localhost:8000, throwaway Postgres
 ```
 
-The database is a single SQLite file at `./data/recipes.db`. Back it up by
-copying it.
+Data lives in Postgres (`PGHOST`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`).
+Production runs in the pi-stack repo against its shared Postgres.
 
 ## Develop
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
+docker compose up -d --wait postgres
+export PGHOST=localhost PGPORT=5433 PGUSER=postgres PGPASSWORD=dev PGDATABASE=recipes
 .venv/bin/pytest
 .venv/bin/uvicorn app.main:app --reload
 ```
 
+## Moving an old SQLite library
+
+```bash
+python -m app.migrate_sqlite path/to/recipes.db   # PG* env points at the target
+```
+
+Keeps ids and is safe to re-run.
+
 ## How it works
 
-- `app/db.py` — every SQL statement in the project. Three tables: `recipes`,
-  `recipe_tags`, `plan`.
+- `app/db.py` — every SQL statement in the project.
 - `app/importer.py` — pastes a URL in, reads the page's schema.org JSON-LD,
   gets a recipe out. Returns nothing rather than raising when a page has no
   recipe data; the UI falls back to the manual form. Note that importing a

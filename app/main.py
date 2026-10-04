@@ -1,4 +1,3 @@
-import os
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
@@ -12,22 +11,13 @@ from fastapi.templating import Jinja2Templates
 from app import db, grocery, importer
 
 BASE_DIR = Path(__file__).parent
-DB_PATH = os.environ.get("DB_PATH", "./recipes.db")
-
-# ponytail: one shared connection for the whole process. sqlite3 is built in
-# serialized mode so concurrent threadpool requests are safe at the C level, and
-# this app serves one household. Switch to a per-request connection (or a write
-# lock) if it ever needs genuinely concurrent writers.
-_conn = None
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    global _conn
-    _conn = db.connect(DB_PATH)
-    db.init_schema(_conn)
+    with db.connect() as conn:
+        db.init_schema(conn)
     yield
-    _conn.close()
 
 
 app = FastAPI(title="Recipe Dashboard", lifespan=lifespan)
@@ -50,7 +40,10 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
 def get_db():
-    return _conn
+    # One connection per request: cheap for one household, and a Postgres
+    # restart can never leave the app holding a dead shared connection.
+    with db.connect() as conn:
+        yield conn
 
 
 def stars(rating) -> str:
