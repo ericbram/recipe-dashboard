@@ -63,12 +63,12 @@ def test_dry_run_writes_nothing(conn, tmp_path):
 
 def test_the_shipped_seed_file_is_loadable_and_consistent(conn):
     """Guards the real data file, not a fixture."""
+    entries = json.loads(seed.SEED_FILE.read_text())
     added, skipped, rejected = seed.seed(conn, dry_run=True)
     assert rejected == []
-    assert added == 165
+    assert added == len(entries), "every entry must be accepted"
     assert skipped == 0
 
-    entries = json.loads(seed.SEED_FILE.read_text())
     titles = [e["title"].strip().lower() for e in entries]
     assert len(titles) == len(set(titles)), "duplicate titles would silently drop recipes"
     assert all(e["title"].strip() for e in entries)
